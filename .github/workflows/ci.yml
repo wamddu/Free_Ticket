@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests (H2 + MySQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Same zone as the deployed containers; the code uses LocalDateTime.now().
+      TZ: Asia/Seoul
+      # Enables the MySQL-only tests: 100 buyers vs the last ticket, and backup.sql schema validation.
+      RUN_MYSQL_CONCURRENCY: "true"
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: concurrency-test
+          MYSQL_DATABASE: free_ticket_test
+          TZ: Asia/Seoul
+        ports:
+          - 3308:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pconcurrency-test"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    defaults:
+      run:
+        working-directory: code/backend
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      - name: Create the deploy schema from backup.sql
+        run: mysql -h 127.0.0.1 -P 3308 -uroot -pconcurrency-test < backup.sql
+
+      - name: Run tests
+        run: ./gradlew test --no-daemon
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-report
+          path: code/backend/build/reports/tests/test
+          retention-days: 7
+
+  frontend:
+    name: Frontend tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: code/frontend
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: code/frontend/package-lock.json
+
+      - run: npm ci
+      # Lint is not enforced yet: 8 existing errors (prefer-const, no-explicit-any) are fixed separately.
+      - run: npm test
+      - run: npm run build
