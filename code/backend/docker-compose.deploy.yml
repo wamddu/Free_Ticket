@@ -66,6 +66,9 @@ services:
       MYSQL_PASSWORD: ${DB_PASSWORD:?required}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
       TZ: Asia/Seoul
+    # 서버 내부(127.0.0.1)에서만 열어 둔다. DB 도구는 SSH 터널로 접속한다.
+    ports:
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./backup.sql:/docker-entrypoint-initdb.d/backup.sql:ro
