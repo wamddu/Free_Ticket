@@ -78,6 +78,6 @@ jobs:
           cache-dependency-path: code/frontend/package-lock.json
 
       - run: npm ci
-      # Lint is not enforced yet: 8 existing errors (prefer-const, no-explicit-any) are fixed separately.
+      - run: npm run lint
       - run: npm test
       - run: npm run build

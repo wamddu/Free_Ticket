@@ -173,39 +173,34 @@ public class PaymentService {
     }
 
     public PaymentResponse confirm(Long userId, ConfirmPaymentRequest request) {
-        log.debug("[SQL CHECK] POST /api/payments/confirm START");
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+
+        //트랜잭션 A
+        Order preparedOrder = transaction.execute(status -> prepareOrder(userId, request));
+
+        if (preparedOrder.getStatus() == OrderStatus.PAID) {
+            return transaction.execute(status -> matchingPaidResponse(preparedOrder, request,
+                    paymentRepository.findByOrderOrderId(request.orderId()).orElse(null)));
+        }
+
+        //토스 외부 승인 요청
+        TossPaymentsClient.TossPaymentResponse toss;
         try {
-            TransactionTemplate transaction = new TransactionTemplate(transactionManager);
-            transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            toss = tossPaymentsClient.confirm(
+                    request.paymentKey(), request.orderId(), request.amount(), preparedOrder.getIdempotencyKey());
+        } catch (RestClientException unknownOutcome) {
+            // 타임아웃·연결 오류는 승인 여부를 알 수 없다. CONFIRMING으로 남겨 복구 스케줄러가 확정한다.
+            log.warn("토스 승인 결과 미확인. 복구 대기. orderId={}", request.orderId(), unknownOutcome);
+            throw recoveryPending(unknownOutcome);
+        }
 
-            //트랜잭션 A
-            Order preparedOrder = transaction.execute(status -> prepareOrder(userId, request));
-
-            if (preparedOrder.getStatus() == OrderStatus.PAID) {
-                return transaction.execute(status -> matchingPaidResponse(preparedOrder, request,
-                        paymentRepository.findByOrderOrderId(request.orderId()).orElse(null)));
-            }
-
-            //토스 외부 승인 요청
-            TossPaymentsClient.TossPaymentResponse toss;
-            try {
-                toss = tossPaymentsClient.confirm(
-                        request.paymentKey(), request.orderId(), request.amount(), preparedOrder.getIdempotencyKey());
-            } catch (RestClientException unknownOutcome) {
-                // 타임아웃·연결 오류는 승인 여부를 알 수 없다. CONFIRMING으로 남겨 복구 스케줄러가 확정한다.
-                log.warn("토스 승인 결과 미확인. 복구 대기. orderId={}", request.orderId(), unknownOutcome);
-                throw recoveryPending(unknownOutcome);
-            }
-
-            //트랜잭션 B
-            try {
-                return transaction.execute(status -> completePayment(userId, request, toss));
-            } catch (RuntimeException failure) {
-                log.warn("결제 완료 처리 실패. DB 상태를 확인합니다. orderId={}", request.orderId(), failure);
-                return recoverPayment(userId, request, toss, transaction, failure);
-            }
-        } finally {
-            log.debug("[SQL CHECK] POST /api/payments/confirm END");
+        //트랜잭션 B
+        try {
+            return transaction.execute(status -> completePayment(userId, request, toss));
+        } catch (RuntimeException failure) {
+            log.warn("결제 완료 처리 실패. DB 상태를 확인합니다. orderId={}", request.orderId(), failure);
+            return recoverPayment(userId, request, toss, transaction, failure);
         }
     }
 
@@ -378,7 +373,7 @@ public class PaymentService {
     public void recoverPendingPayments() {
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        // ponytail: 순차 배치 20건. 처리량이 부족해지면 잠금·멱등성을 유지하는 작업자 병렬화를 검토한다.
+        // 한 번에 20건씩 순서대로 처리한다. 처리량이 부족해지면 잠금과 멱등성을 유지한 채 병렬화를 검토한다.
         var candidates = orderRepository.findRecoveryCandidates(LocalDateTime.now(), PageRequest.of(0, 20));
         for (Long id : candidates) {
             RecoveryAttempt attempt = null;

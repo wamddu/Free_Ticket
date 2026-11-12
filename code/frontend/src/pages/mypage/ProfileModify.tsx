@@ -51,7 +51,7 @@ export default function ProfileModify() {
     }
 
     try {
-      let requestData:UpdateMyInfoRequest = {};
+      const requestData:UpdateMyInfoRequest = {};
 
       if (usernameInput !== user?.username) {
         requestData.username = usernameInput;
@@ -80,7 +80,7 @@ export default function ProfileModify() {
       navigate("/mypage/profile");
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        let message = error.response?.data?.message ?? "예상치 못한 오류로 정보수정에 실패하였습니다.";
+        const message = error.response?.data?.message ?? "예상치 못한 오류로 정보수정에 실패하였습니다.";
         setErrorMessage(message);
       }
     }

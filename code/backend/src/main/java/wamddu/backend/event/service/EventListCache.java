@@ -30,7 +30,7 @@ public class EventListCache {
     private final StringRedisTemplate redis;
     private final ObjectMapper json;
     private final boolean enabled;
-    // shortcut: bound reply buffers; retune with measured page sizes and Redis memory when scaling.
+    // 동시에 읽는 Redis 응답 수를 제한해 메모리 사용을 묶어 둔다. 규모가 커지면 측정한 페이지 크기에 맞춰 조정한다.
     private final Semaphore reads = new Semaphore(32, true);
 
     public EventListCache(StringRedisTemplate redis, ObjectMapper json,
@@ -54,7 +54,7 @@ public class EventListCache {
             log.warn("Event list cache unavailable ({}); reading from database", unavailable.getClass().getSimpleName());
             return json.writeValueAsBytes(loader.get());
         }
-        // shortcut: coordinates one app instance; use distributed coordination when scaling out.
+        // 캐시 미스 시 DB 조회를 한 번만 하도록 이 서버 안에서만 막는다. 서버를 여러 대로 늘리면 분산 락이 필요하다.
         synchronized (this) {
             try {
                 byte[] cached = read(fieldBytes);

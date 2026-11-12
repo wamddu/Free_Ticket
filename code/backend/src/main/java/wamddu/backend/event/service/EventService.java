@@ -60,28 +60,23 @@ public class EventService {
     }
 
     private Slice<EventSummaryResponse> searchEvents(EventSearchCriteria criteria, Pageable pageable) {
-        log.debug("[SQL CHECK] GET /api/events START");
-        try {
-            String category = normalizeSearchValue(criteria.category());
-            String title = normalizeSearchValue(criteria.title());
-            String region = normalizeSearchValue(criteria.region());
-            if (category != null && !SEARCH_CATEGORIES.contains(category)) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_EVENT_CATEGORY", "유효하지 않은 이벤트 카테고리입니다.");
-            }
-
-            // shortcut: 주소 문자열로 지역을 찾는다. 주소 약칭이나 정확한 행정구역 구분이 필요하면 지역 코드를 도입한다.
-            validateTicketFilters(criteria);
-            if (criteria.hasTicketFilters()) {
-                return eventRepository.searchEventsWithTickets(
-                        category, containsPattern(title), containsPattern(region),
-                        criteria.dateFrom() == null ? null : criteria.dateFrom().atStartOfDay(),
-                        criteria.dateTo() == null ? null : criteria.dateTo().plusDays(1).atStartOfDay(),
-                        criteria.maxPrice(), Boolean.TRUE.equals(criteria.availableOnly()), LocalDateTime.now(), pageable);
-            }
-            return eventRepository.searchEvents(category, containsPattern(title), containsPattern(region), pageable);
-        } finally {
-            log.debug("[SQL CHECK] GET /api/events END");
+        String category = normalizeSearchValue(criteria.category());
+        String title = normalizeSearchValue(criteria.title());
+        String region = normalizeSearchValue(criteria.region());
+        if (category != null && !SEARCH_CATEGORIES.contains(category)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_EVENT_CATEGORY", "유효하지 않은 이벤트 카테고리입니다.");
         }
+
+        // 지역은 주소 문자열 부분 일치로 찾는다. 약칭이나 정확한 행정구역 구분이 필요해지면 지역 코드를 도입한다.
+        validateTicketFilters(criteria);
+        if (criteria.hasTicketFilters()) {
+            return eventRepository.searchEventsWithTickets(
+                    category, containsPattern(title), containsPattern(region),
+                    criteria.dateFrom() == null ? null : criteria.dateFrom().atStartOfDay(),
+                    criteria.dateTo() == null ? null : criteria.dateTo().plusDays(1).atStartOfDay(),
+                    criteria.maxPrice(), Boolean.TRUE.equals(criteria.availableOnly()), LocalDateTime.now(), pageable);
+        }
+        return eventRepository.searchEvents(category, containsPattern(title), containsPattern(region), pageable);
     }
 
     private void validateTicketFilters(EventSearchCriteria criteria) {
@@ -113,42 +108,32 @@ public class EventService {
     }
 
     public WhatsHotResponse whatshot(String category, Integer limit) {
-        log.debug("[SQL CHECK] GET /api/events/whats-hot START");
-        try {
-            if (limit == null || limit < 1 || limit > 20) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_LIMIT", "limit은 1 이상 20 이하로 입력해 주세요.");
-            }
-
-            if(category != null) {
-                List<String> categories = eventRepository.findAllCategories();
-                if (!categories.contains(category)) {
-                    throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_EVENT_CATEGORY", "유효하지 않은 이벤트 카테고리입니다.");
-                }
-            }
-
-            List<WhatsHotEventResponse> allEvents = eventRepository.whatshot(category, limit);
-
-            return new WhatsHotResponse(category, allEvents);
-        } finally {
-            log.debug("[SQL CHECK] GET /api/events/whats-hot END");
+        if (limit == null || limit < 1 || limit > 20) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_LIMIT", "limit은 1 이상 20 이하로 입력해 주세요.");
         }
+
+        if(category != null) {
+            List<String> categories = eventRepository.findAllCategories();
+            if (!categories.contains(category)) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_EVENT_CATEGORY", "유효하지 않은 이벤트 카테고리입니다.");
+            }
+        }
+
+        List<WhatsHotEventResponse> allEvents = eventRepository.whatshot(category, limit);
+
+        return new WhatsHotResponse(category, allEvents);
     }
 
     public EventDetailResponse getDetail(Long id) {
-        log.debug("[SQL CHECK] GET /api/events/{eventId} START");
-        try {
-            Event event = eventRepository.findById(id)
-                    .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "EVENT_NOT_FOUND", "이벤트를 찾을 수 없습니다."));
+        Event event = eventRepository.findById(id)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "EVENT_NOT_FOUND", "이벤트를 찾을 수 없습니다."));
 
-            List<Ticket> allTickets = ticketRepository.getAllEventTickets(id);
+        List<Ticket> allTickets = ticketRepository.getAllEventTickets(id);
 
-            List<EventTicketResponse> responseTickets = allTickets.stream()
-                    .map(EventTicketResponse::from)
-                    .toList();
+        List<EventTicketResponse> responseTickets = allTickets.stream()
+                .map(EventTicketResponse::from)
+                .toList();
 
-            return EventDetailResponse.of(EventInfoResponse.from(event), responseTickets);
-        } finally {
-            log.debug("[SQL CHECK] GET /api/events/{eventId} END");
-        }
+        return EventDetailResponse.of(EventInfoResponse.from(event), responseTickets);
     }
 }

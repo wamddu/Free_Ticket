@@ -65,7 +65,7 @@ public class TicketChatService {
     }
 
     private synchronized void reserveRequest() {
-        // shortcut: 서버 인스턴스별 공유 한도다. 다중 서버 운영 시 공유 저장소로 옮긴다.
+        // 한도는 서버(인스턴스)마다 따로 센다. 서버를 여러 대로 늘리면 Redis 같은 공유 저장소로 옮긴다.
         long now = System.nanoTime();
         while (!recentRequests.isEmpty() && now - recentRequests.peekFirst() >= TimeUnit.MINUTES.toNanos(1)) {
             recentRequests.removeFirst();

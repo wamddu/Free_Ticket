@@ -51,106 +51,91 @@ public class UserService {
     @Transactional
     public SignupResponse signUp(SignupRequest request) {
         request.setEmail(EmailVerificationService.normalizeEmail(request.getEmail()));
-        log.debug("[SQL CHECK] POST /api/auth/signup START");
-        try {
-            // 이메일 중복 검사
-            if (userRepository.existsByEmail(request.getEmail())) {
-                throw new ApiException(HttpStatus.CONFLICT, "EMAIL_ALREADY_EXISTS", "이미 사용 중인 이메일입니다.");
-            }
-
-            // 전화번호 중복 검사
-            if (userRepository.existsByPhonenumber(request.getPhonenumber())) {
-                throw new ApiException(HttpStatus.CONFLICT, "PHONENUMBER_ALREADY_EXISTS", "이미 등록된 전화번호입니다.");
-            }
-
-            User user = new User();
-            user.setUsername(request.getUsername());
-            user.setPassword(passwordEncoder.encode(request.getPassword()));
-            user.setEmail(request.getEmail());
-            user.setEmailVerifiedAt(emailVerificationService.consume(request.getEmail(), request.getEmailVerificationToken()));
-            user.setPhonenumber(request.getPhonenumber());
-            user.setRole(Role.USER);
-            user.setStatus(UserStatus.ACTIVE);
-            user.setCustomerKey(generateCustomerKey());
-            User savedUser = userRepository.save(user);
-
-            return SignupResponse.of("회원가입이 완료되었습니다.", UserInfoResponse.from(savedUser, false));
-        } finally {
-            log.debug("[SQL CHECK] POST /api/auth/signup END");
+        // 이메일 중복 검사
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new ApiException(HttpStatus.CONFLICT, "EMAIL_ALREADY_EXISTS", "이미 사용 중인 이메일입니다.");
         }
+
+        // 전화번호 중복 검사
+        if (userRepository.existsByPhonenumber(request.getPhonenumber())) {
+            throw new ApiException(HttpStatus.CONFLICT, "PHONENUMBER_ALREADY_EXISTS", "이미 등록된 전화번호입니다.");
+        }
+
+        User user = new User();
+        user.setUsername(request.getUsername());
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setEmail(request.getEmail());
+        user.setEmailVerifiedAt(emailVerificationService.consume(request.getEmail(), request.getEmailVerificationToken()));
+        user.setPhonenumber(request.getPhonenumber());
+        user.setRole(Role.USER);
+        user.setStatus(UserStatus.ACTIVE);
+        user.setCustomerKey(generateCustomerKey());
+        User savedUser = userRepository.save(user);
+
+        return SignupResponse.of("회원가입이 완료되었습니다.", UserInfoResponse.from(savedUser, false));
     }
 
     @Transactional
     public LoginResult login(LoginRequest request) {
-        log.debug("[SQL CHECK] POST /api/auth/login START");
-        try {
-            User user = userRepository.findByEmail(request.getEmail());
+        User user = userRepository.findByEmail(request.getEmail());
 
-            if (user == null || user.getStatus() != UserStatus.ACTIVE || !passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-                throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "이메일 또는 비밀번호가 올바르지 않습니다.");
-            }
-
-            String accessToken = jwtProvider.generateJwtToken(user.getId(), user.getRole().name());
-            String refreshToken = jwtProvider.generateRefreshToken(user.getId());
-            Claims refreshClaims = jwtProvider.parseRefreshToken(refreshToken);
-            refreshTokenStore.save(refreshClaims.get("family_id", String.class), user.getId(), refreshToken,
-                    refreshClaims.getExpiration().toInstant());
-
-            LoginResponse response = LoginResponse.builder()
-                    .message("로그인에 성공했습니다.")
-                    .accessToken(accessToken)
-                    .tokenType("Bearer")
-                    .expiresIn(jwtProvider.getAccessExpiresIn())
-                    .user(toUserInfo(user))
-                    .build();
-
-            return new LoginResult(response, refreshToken, refreshClaims.getExpiration().toInstant());
-        } finally {
-            log.debug("[SQL CHECK] POST /api/auth/login END");
+        if (user == null || user.getStatus() != UserStatus.ACTIVE || !passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "이메일 또는 비밀번호가 올바르지 않습니다.");
         }
+
+        String accessToken = jwtProvider.generateJwtToken(user.getId(), user.getRole().name());
+        String refreshToken = jwtProvider.generateRefreshToken(user.getId());
+        Claims refreshClaims = jwtProvider.parseRefreshToken(refreshToken);
+        refreshTokenStore.save(refreshClaims.get("family_id", String.class), user.getId(), refreshToken,
+                refreshClaims.getExpiration().toInstant());
+
+        LoginResponse response = LoginResponse.builder()
+                .message("로그인에 성공했습니다.")
+                .accessToken(accessToken)
+                .tokenType("Bearer")
+                .expiresIn(jwtProvider.getAccessExpiresIn())
+                .user(toUserInfo(user))
+                .build();
+
+        return new LoginResult(response, refreshToken, refreshClaims.getExpiration().toInstant());
     }
 
     @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public TokenReissueResult reissueToken(String refreshToken) {
-        log.debug("[SQL CHECK] POST /api/auth/refresh START");
-        try {
-            if (refreshToken == null) {
-                throw new ApiException(HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_NOT_FOUND", "로그인 정보가 없습니다.");
-            }
-
-            Claims refreshClaims;
-            try {
-                refreshClaims = jwtProvider.parseRefreshToken(refreshToken);
-            } catch (ExpiredJwtException exception) {
-                throw new ApiException(HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_EXPIRED", "로그인 정보가 만료되었습니다. 다시 로그인해 주세요.");
-            } catch (JwtException | IllegalArgumentException exception) {
-                throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_REFRESH_TOKEN", "유효하지 않은 로그인 정보입니다. 다시 로그인해 주세요.");
-            }
-
-            Long id = Long.parseLong(refreshClaims.getSubject());
-            User user = userRepository.findById(id)
-                    .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_REVOKED", "로그인 정보가 폐기되었습니다."));
-
-            if (user.getStatus() != UserStatus.ACTIVE) {
-                throw new ApiException(HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_REVOKED", "로그인 정보가 폐기되었습니다.");
-            }
-
-            String newRefreshToken = jwtProvider.rotateRefreshToken(refreshClaims);
-            if (!refreshTokenStore.rotate(refreshClaims.get("family_id", String.class), id, refreshToken, newRefreshToken)) {
-                throw new ApiException(HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_REVOKED", "로그인 정보가 폐기되었습니다. 다시 로그인해 주세요.");
-            }
-            String newToken = jwtProvider.generateJwtToken(user.getId(), user.getRole().name());
-
-            RefreshResponse response = RefreshResponse.builder()
-                    .accessToken(newToken)
-                    .tokenType("Bearer")
-                    .expiresIn(jwtProvider.getAccessExpiresIn())
-                    .build();
-
-            return new TokenReissueResult(response, newRefreshToken, refreshClaims.getExpiration().toInstant());
-        } finally {
-            log.debug("[SQL CHECK] POST /api/auth/refresh END");
+        if (refreshToken == null) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_NOT_FOUND", "로그인 정보가 없습니다.");
         }
+
+        Claims refreshClaims;
+        try {
+            refreshClaims = jwtProvider.parseRefreshToken(refreshToken);
+        } catch (ExpiredJwtException exception) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_EXPIRED", "로그인 정보가 만료되었습니다. 다시 로그인해 주세요.");
+        } catch (JwtException | IllegalArgumentException exception) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_REFRESH_TOKEN", "유효하지 않은 로그인 정보입니다. 다시 로그인해 주세요.");
+        }
+
+        Long id = Long.parseLong(refreshClaims.getSubject());
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_REVOKED", "로그인 정보가 폐기되었습니다."));
+
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_REVOKED", "로그인 정보가 폐기되었습니다.");
+        }
+
+        String newRefreshToken = jwtProvider.rotateRefreshToken(refreshClaims);
+        if (!refreshTokenStore.rotate(refreshClaims.get("family_id", String.class), id, refreshToken, newRefreshToken)) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "REFRESH_TOKEN_REVOKED", "로그인 정보가 폐기되었습니다. 다시 로그인해 주세요.");
+        }
+        String newToken = jwtProvider.generateJwtToken(user.getId(), user.getRole().name());
+
+        RefreshResponse response = RefreshResponse.builder()
+                .accessToken(newToken)
+                .tokenType("Bearer")
+                .expiresIn(jwtProvider.getAccessExpiresIn())
+                .build();
+
+        return new TokenReissueResult(response, newRefreshToken, refreshClaims.getExpiration().toInstant());
     }
 
     @Transactional
@@ -166,58 +151,48 @@ public class UserService {
     }
 
     public MyInfoResponse getMyInfo(UserDetails userDetails) {
-        log.debug("[SQL CHECK] GET /api/auth/me START");
-        try {
-            User user = userRepository.findById(Long.parseLong(userDetails.getUsername()))
-                    .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다."));
+        User user = userRepository.findById(Long.parseLong(userDetails.getUsername()))
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다."));
 
-            if (user.getStatus() != UserStatus.ACTIVE) {
-                throw new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
-            }
-
-            return MyInfoResponse.from(toUserInfo(user));
-        } finally {
-            log.debug("[SQL CHECK] GET /api/auth/me END");
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
         }
+
+        return MyInfoResponse.from(toUserInfo(user));
     }
 
     @Transactional
     public UpdateMyInfoResponse updateMyInfo(UpdateMyInfoRequest request, UserDetails userDetails) {
-        log.debug("[SQL CHECK] POST /api/users/me START");
-        try {
-            User user = userRepository.findByIdForUpdate(Long.parseLong(userDetails.getUsername()))
-                    .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다."));
+        User user = userRepository.findByIdForUpdate(Long.parseLong(userDetails.getUsername()))
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다."));
 
-            if (user.getStatus() != UserStatus.ACTIVE) {
-                throw new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
-            }
-
-            if (request.getEmail() != null && !request.getEmail().equalsIgnoreCase(user.getEmail())) {
-                String email = EmailVerificationService.normalizeEmail(request.getEmail());
-                if (userRepository.existsByEmail(email)) {
-                    throw new ApiException(HttpStatus.CONFLICT, "EMAIL_ALREADY_EXISTS", "이미 사용 중인 이메일입니다.");
-                }
-                user.setEmailVerifiedAt(emailVerificationService.consume(email, request.getEmailVerificationToken()));
-                user.setEmail(email);
-            }
-
-            if (request.getPhonenumber() != null) {
-                if (userRepository.existsByPhonenumber(request.getPhonenumber())) {
-                    throw new ApiException(HttpStatus.CONFLICT, "PHONENUMBER_ALREADY_EXISTS", "이미 등록된 전화번호입니다.");
-                }
-                user.setPhonenumber(request.getPhonenumber());
-            }
-
-            if (request.getUsername() != null) {
-                user.setUsername(request.getUsername());
-            }
-
-            User updatedUser = userRepository.save(user);
-
-            return UpdateMyInfoResponse.of("회원 정보가 수정되었습니다.", toUserInfo(updatedUser));
-        } finally {
-            log.debug("[SQL CHECK] POST /api/users/me END");
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
         }
+
+        if (request.getEmail() != null && !request.getEmail().equalsIgnoreCase(user.getEmail())) {
+            String email = EmailVerificationService.normalizeEmail(request.getEmail());
+            if (userRepository.existsByEmail(email)) {
+                throw new ApiException(HttpStatus.CONFLICT, "EMAIL_ALREADY_EXISTS", "이미 사용 중인 이메일입니다.");
+            }
+            user.setEmailVerifiedAt(emailVerificationService.consume(email, request.getEmailVerificationToken()));
+            user.setEmail(email);
+        }
+
+        if (request.getPhonenumber() != null) {
+            if (userRepository.existsByPhonenumber(request.getPhonenumber())) {
+                throw new ApiException(HttpStatus.CONFLICT, "PHONENUMBER_ALREADY_EXISTS", "이미 등록된 전화번호입니다.");
+            }
+            user.setPhonenumber(request.getPhonenumber());
+        }
+
+        if (request.getUsername() != null) {
+            user.setUsername(request.getUsername());
+        }
+
+        User updatedUser = userRepository.save(user);
+
+        return UpdateMyInfoResponse.of("회원 정보가 수정되었습니다.", toUserInfo(updatedUser));
     }
 
     private UserInfoResponse toUserInfo(User user) {
@@ -226,59 +201,49 @@ public class UserService {
 
     @Transactional
     public MessageResponse updateMyPassword(ChangePasswordRequest request, UserDetails userDetails) {
-        log.debug("[SQL CHECK] PATCH /api/users/me/password START");
-        try {
-            User user = userRepository.findByIdForUpdate(Long.parseLong(userDetails.getUsername()))
-                    .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다."));
+        User user = userRepository.findByIdForUpdate(Long.parseLong(userDetails.getUsername()))
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다."));
 
-            if (user.getStatus() != UserStatus.ACTIVE) {
-                throw new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
-            }
-
-            if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_CURRENT_PASSWORD", "현재 비밀번호가 올바르지 않습니다.");
-            }
-
-            if (passwordEncoder.matches(request.getNewPassword(), user.getPassword())) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "SAME_AS_CURRENT_PASSWORD", "새 비밀번호는 현재 비밀번호와 달라야 합니다.");
-            }
-
-            String newPassword = passwordEncoder.encode(request.getNewPassword());
-            user.setPassword(newPassword);
-            userRepository.save(user);
-            refreshTokenStore.revokeAll(user.getId());
-
-            return MessageResponse.from("비밀번호가 변경되었습니다.");
-        } finally {
-            log.debug("[SQL CHECK] PATCH /api/users/me/password END");
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
         }
+
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_CURRENT_PASSWORD", "현재 비밀번호가 올바르지 않습니다.");
+        }
+
+        if (passwordEncoder.matches(request.getNewPassword(), user.getPassword())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "SAME_AS_CURRENT_PASSWORD", "새 비밀번호는 현재 비밀번호와 달라야 합니다.");
+        }
+
+        String newPassword = passwordEncoder.encode(request.getNewPassword());
+        user.setPassword(newPassword);
+        userRepository.save(user);
+        refreshTokenStore.revokeAll(user.getId());
+
+        return MessageResponse.from("비밀번호가 변경되었습니다.");
     }
 
     @Transactional
     public MessageResponse deleteMyAccount(DeleteAccountRequest request, UserDetails userDetails) {
-        log.debug("[SQL CHECK] DELETE /api/users/me START");
-        try {
-            User user = userRepository.findByIdForUpdate(Long.parseLong(userDetails.getUsername()))
-                    .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다."));
+        User user = userRepository.findByIdForUpdate(Long.parseLong(userDetails.getUsername()))
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다."));
 
-            if (user.getStatus() != UserStatus.ACTIVE) {
-                throw new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
-            }
-
-            if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_PASSWORD", "비밀번호가 올바르지 않습니다.");
-            }
-
-            user.setStatus(UserStatus.DELETED);
-            user.setEmail("deleted_" + System.currentTimeMillis() + "_" + user.getEmail());
-            if (user.getPhonenumber() != null) {
-                user.setPhonenumber("deleted_" + System.currentTimeMillis() + "_" + user.getPhonenumber());
-            }
-            userRepository.save(user);
-            refreshTokenStore.revokeAll(user.getId());
-            return MessageResponse.from("회원 탈퇴가 완료되었습니다.");
-        } finally {
-            log.debug("[SQL CHECK] DELETE /api/users/me END");
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
         }
+
+        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_PASSWORD", "비밀번호가 올바르지 않습니다.");
+        }
+
+        user.setStatus(UserStatus.DELETED);
+        user.setEmail("deleted_" + System.currentTimeMillis() + "_" + user.getEmail());
+        if (user.getPhonenumber() != null) {
+            user.setPhonenumber("deleted_" + System.currentTimeMillis() + "_" + user.getPhonenumber());
+        }
+        userRepository.save(user);
+        refreshTokenStore.revokeAll(user.getId());
+        return MessageResponse.from("회원 탈퇴가 완료되었습니다.");
     }
 }

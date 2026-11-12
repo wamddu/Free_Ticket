@@ -1,3 +1,7 @@
 node_modules/*
 REFACTORING_HISTORY.md
 /artifacts
+
+# Personal IDE settings
+.idea/
+.vscode/

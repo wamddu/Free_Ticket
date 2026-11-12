@@ -142,7 +142,7 @@ public class EmailVerificationService {
     }
 
     private synchronized void reserveSend(Instant now) {
-        // shortcut: single-process local SMTP budget; use a shared limiter before multi-instance deployment.
+        // 시간당 발송 한도는 이 서버 안에서만 센다. 서버를 여러 대로 늘리기 전에 공유 저장소 기반 제한으로 바꾼다.
         while (!recentSends.isEmpty() && !recentSends.getFirst().plusSeconds(3600).isAfter(now)) recentSends.removeFirst();
         if (recentSends.size() >= 30) throw rateLimited();
         recentSends.addLast(now);

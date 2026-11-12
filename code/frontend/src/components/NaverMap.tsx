@@ -8,12 +8,14 @@ export default function NaverMap({ address }: NaverMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!mapRef.current || !window.naver || !address) return;
+    const maps = window.naver?.maps;
+    if (!mapRef.current || !maps || !address) return;
+    const container = mapRef.current;
 
-    window.naver.maps.Service.geocode(
+    maps.Service.geocode(
       { query: address },
-      (status: any, response: any) => {
-        if (status !== window.naver.maps.Service.Status.OK) {
+      (status, response) => {
+        if (status !== maps.Service.Status.OK) {
           console.error("주소 검색에 실패했습니다.");
           return;
         }
@@ -25,17 +27,17 @@ export default function NaverMap({ address }: NaverMapProps) {
           return;
         }
 
-        const position = new window.naver.maps.LatLng(
+        const position = new maps.LatLng(
           Number(result.y),
           Number(result.x)
         );
 
-        const map = new window.naver.maps.Map(mapRef.current, {
+        const map = new maps.Map(container, {
           center: position,
           zoom: 16,
         });
 
-        new window.naver.maps.Marker({
+        new maps.Marker({
           position,
           map,
         });

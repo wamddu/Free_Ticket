@@ -104,7 +104,7 @@ public class TicketPricingService {
         if (remainingSeconds <= OBSERVATION_PERIOD.toSeconds() || remainingSeconds <= totalSeconds * 0.1) {
             return ticket.getMinPrice();
         }
-        // shortcut: fixed markdown thresholds; calibrate from real sales before claiming optimal prices.
+        // 인하 폭(2/5/10%)은 고정값이다. 최적 가격이라고 하려면 실제 판매 데이터로 보정해야 한다.
         int discount = pace >= 0.8 ? 2 : pace >= 0.5 ? 5 : 10;
         return Math.max(ticket.getMinPrice(), (int) ((long) current * (100 - discount) / 100));
     }

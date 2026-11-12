@@ -61,7 +61,7 @@ export default function PasswordReset() {
       setErrorMessage(null);
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        let message = error.response?.data?.message ?? "예상치 못한 오류가 발생했습니다.";
+        const message = error.response?.data?.message ?? "예상치 못한 오류가 발생했습니다.";
         setErrorMessage(message);
       }
     }
@@ -82,7 +82,7 @@ export default function PasswordReset() {
       window.location.replace("/");
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        let message = error.response?.data?.message ?? "예상치 못한 오류가 발생했습니다.";
+        const message = error.response?.data?.message ?? "예상치 못한 오류가 발생했습니다.";
         setDeleteInputErrorMessage(message);
       }
     }
