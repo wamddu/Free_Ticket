@@ -1,7 +1,8 @@
 package wamddu.backend.event.controller;
 
 import org.junit.jupiter.api.Test;
-import wamddu.backend.event.dto.response.WhatsHotEventResponse;
+import wamddu.backend.event.dto.response.WeeklyRankingEventResponse;
+import wamddu.backend.event.dto.response.WeeklyRankingResponse;
 import wamddu.backend.event.dto.response.WhatsHotResponse;
 import wamddu.backend.event.service.EventService;
 import wamddu.backend.event.service.EventListCache;
@@ -13,6 +14,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 class EventControllerHotCacheTest {
@@ -42,22 +44,18 @@ class EventControllerHotCacheTest {
     }
 
     @Test
-    void weeklyRankingUsesTheSameCachedHotOrderAndRanks() {
+    void weeklyRankingIsCalculatedSeparatelyFromHotAndCachedPerKey() {
         var service = mock(EventService.class);
-        var early = new WhatsHotEventResponse(1L, 2L, "early", LocalDate.of(2026, 9, 1),
-                LocalDate.of(2026, 10, 1), "Seoul", "banner-2", "poster-2", "musical");
-        var late = new WhatsHotEventResponse(1L, 1L, "late", LocalDate.of(2026, 9, 1),
-                LocalDate.of(2026, 12, 1), "Seoul", "banner-1", "poster-1", "musical");
-        when(service.whatshot("musical", 5)).thenReturn(new WhatsHotResponse("musical", List.of(early, late)));
+        var weekly = new WeeklyRankingResponse("musical", WeeklyRankingResponse.Period.WEEKLY, List.of(
+                new WeeklyRankingEventResponse(1L, 2L, "weekly", LocalDate.of(2026, 9, 1),
+                        LocalDate.of(2026, 10, 1), "Seoul", "poster-2", "musical")));
+        when(service.weeklyRanking("musical", 5)).thenReturn(weekly);
         var controller = new EventController(service, mock(EventListCache.class));
 
-        controller.whatshot("musical", 5);
-        var ranking = controller.getWeeklyRanking("musical", 5).getData();
+        assertThat(controller.getWeeklyRanking("musical", 5).getData()).isSameAs(weekly);
+        assertThat(controller.getWeeklyRanking("musical", 5).getData()).isSameAs(weekly);
 
-        assertThat(ranking.category()).isEqualTo("musical");
-        assertThat(ranking.events()).extracting("id").containsExactly(2L, 1L);
-        assertThat(ranking.events()).extracting("rank").containsExactly(1L, 1L);
-        assertThat(ranking.events()).extracting("mainImageUrl").containsExactly("poster-2", "poster-1");
-        verify(service, times(1)).whatshot("musical", 5);
+        verify(service, times(1)).weeklyRanking("musical", 5);
+        verify(service, never()).whatshot(any(), any());
     }
 }

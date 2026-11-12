@@ -4,13 +4,14 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import { getEvents, getWhatsHot } from "../../api/events";
+import { getEvents, getWeeklyRanking, getWhatsHot } from "../../api/events";
 import type { EventSummary } from "../../types/Event";
 import EventPageLayout from "./EventPageLayout";
 
 vi.mock("../../api/events", () => ({
   getEvents: vi.fn(),
   getWhatsHot: vi.fn(),
+  getWeeklyRanking: vi.fn(),
 }));
 
 const event: EventSummary = {
@@ -33,15 +34,51 @@ beforeEach(() => {
     rank: 1, id: 2, name: "early", startDate: "2026-09-01", endDate: "2026-10-01",
     location: "Seoul", bannerImageUrl: "banner", mainImageUrl: "poster", category: "musical",
   }]);
+  vi.mocked(getWeeklyRanking).mockResolvedValue({
+    category: "musical", period: "WEEKLY", events: [{
+      rank: 1, id: 7, name: "이번 주 판매 1위", startDate: "2026-09-01", endDate: "2026-12-01",
+      location: "Seoul", mainImageUrl: "poster", category: "musical",
+    }],
+  });
 });
 afterEach(cleanup);
 
-test("주간순위는 HOT 결과로 표시하고 주간순위 API를 다시 호출하지 않는다", async () => {
+function ranking() {
+  return within(screen.getByRole("heading", { level: 2, name: /RANKING/ }).closest("section")!);
+}
+
+test("주간 순위는 HOT과 별도로 최근 7일 판매 순위 API 결과를 표시한다", async () => {
   render(<MemoryRouter><EventPageLayout category="musical" categoryName="뮤지컬" /></MemoryRouter>);
 
   expect(await screen.findByText("이번 주 1위")).toBeTruthy();
-  expect(getWhatsHot).toHaveBeenCalledWith({ category: "musical", limit: 5 });
+  expect(ranking().getByRole("heading", { name: "WEEKLY RANKING" })).toBeTruthy();
+  expect(ranking().getByRole("heading", { name: "이번 주 판매 1위" })).toBeTruthy();
+  expect(ranking().queryByRole("heading", { name: "early" })).toBeNull();
+  expect(getWeeklyRanking).toHaveBeenCalledWith({ category: "musical", limit: 5 });
   expect(getWhatsHot).toHaveBeenCalledTimes(1);
+});
+
+test("이번 주 판매가 없어 누적 순위로 대체되면 제목도 누적 기준으로 바뀐다", async () => {
+  vi.mocked(getWeeklyRanking).mockResolvedValue({
+    category: "musical", period: "ALL_TIME", events: [{
+      rank: 1, id: 8, name: "누적 판매 공연", startDate: "2026-09-01", endDate: "2026-12-01",
+      location: "Seoul", mainImageUrl: "poster", category: "musical",
+    }],
+  });
+  render(<MemoryRouter><EventPageLayout category="musical" categoryName="뮤지컬" /></MemoryRouter>);
+
+  expect(await screen.findByText("누적 판매 1위")).toBeTruthy();
+  expect(ranking().getByRole("heading", { name: "BEST RANKING" })).toBeTruthy();
+  expect(screen.queryByText("이번 주 1위")).toBeNull();
+  expect(screen.queryByText("WEEKLY RANKING")).toBeNull();
+});
+
+test("주간 순위만 실패해도 다른 영역은 표시한다", async () => {
+  vi.mocked(getWeeklyRanking).mockRejectedValue(new Error("offline"));
+  render(<MemoryRouter><EventPageLayout category="musical" categoryName="뮤지컬" /></MemoryRouter>);
+
+  expect(await screen.findByText("주간 순위를 불러오지 못했습니다.")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "WHAT'S HOT" })).toBeTruthy();
 });
 
 test("마감 임박은 첫 페이지에 없는 공연도 서버가 정한 순서대로 표시한다", async () => {

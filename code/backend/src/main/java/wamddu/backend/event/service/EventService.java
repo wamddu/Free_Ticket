@@ -18,6 +18,7 @@ import wamddu.backend.ticket.dto.response.EventTicketResponse;
 import wamddu.backend.ticket.domain.Ticket;
 import wamddu.backend.ticket.repository.TicketRepository;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.time.LocalDate;
@@ -28,6 +29,7 @@ import java.time.LocalDateTime;
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class EventService {
+    static final Duration WEEKLY_WINDOW = Duration.ofDays(7);
     private static final Set<String> SEARCH_CATEGORIES = Set.of(
             "concert", "musical", "play", "classic", "exhibition", "busking");
 
@@ -107,17 +109,37 @@ public class EventService {
         return "%" + value.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
     }
 
-    public WhatsHotResponse whatshot(String category, Integer limit) {
+    public WeeklyRankingResponse weeklyRanking(String category, Integer limit) {
+        return weeklyRanking(category, limit, LocalDateTime.now());
+    }
+
+    WeeklyRankingResponse weeklyRanking(String category, Integer limit, LocalDateTime now) {
+        validateRankingQuery(category, limit);
+        List<WeeklyRankingEventResponse> weekly =
+                eventRepository.weeklyRanking(category, now.minus(WEEKLY_WINDOW), now, limit);
+        if (!weekly.isEmpty()) {
+            return new WeeklyRankingResponse(category, WeeklyRankingResponse.Period.WEEKLY, weekly);
+        }
+        // Nothing sold in the window: show cumulative sales instead of an empty section, and say so.
+        List<WeeklyRankingEventResponse> allTime = eventRepository.whatshot(category, limit).stream()
+                .map(event -> new WeeklyRankingEventResponse(event.getRank(), event.getId(), event.getName(),
+                        event.getStartDate(), event.getEndDate(), event.getLocation(),
+                        event.getMainImageUrl(), event.getCategory()))
+                .toList();
+        return new WeeklyRankingResponse(category, WeeklyRankingResponse.Period.ALL_TIME, allTime);
+    }
+
+    private void validateRankingQuery(String category, Integer limit) {
         if (limit == null || limit < 1 || limit > 20) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_LIMIT", "limit은 1 이상 20 이하로 입력해 주세요.");
         }
-
-        if(category != null) {
-            List<String> categories = eventRepository.findAllCategories();
-            if (!categories.contains(category)) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_EVENT_CATEGORY", "유효하지 않은 이벤트 카테고리입니다.");
-            }
+        if (category != null && !eventRepository.findAllCategories().contains(category)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_EVENT_CATEGORY", "유효하지 않은 이벤트 카테고리입니다.");
         }
+    }
+
+    public WhatsHotResponse whatshot(String category, Integer limit) {
+        validateRankingQuery(category, limit);
 
         List<WhatsHotEventResponse> allEvents = eventRepository.whatshot(category, limit);
 

@@ -9,7 +9,6 @@ import java.time.LocalDate;
 import wamddu.backend.event.dto.request.EventSearchCriteria;
 import wamddu.backend.event.dto.response.EventDetailResponse;
 import wamddu.backend.event.dto.response.EventPageResponse;
-import wamddu.backend.event.dto.response.WeeklyRankingEventResponse;
 import wamddu.backend.event.dto.response.WeeklyRankingResponse;
 import wamddu.backend.event.dto.response.WhatsHotResponse;
 import wamddu.backend.event.service.EventService;
@@ -19,6 +18,7 @@ import wamddu.backend.global.response.ApiResponse;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.Set;
+import java.util.function.Supplier;
 
 @RestController
 @RequestMapping("/api/events")
@@ -29,11 +29,29 @@ public class EventController {
     private final EventListCache eventListCache;
     private static final Set<String> CACHE_CATEGORIES = Set.of("concert", "musical", "play", "classic", "exhibition", "busking");
     private static final long HOT_CACHE_TTL_NANOS = TimeUnit.SECONDS.toNanos(5);
-    // ponytail: 서버별 캐시다. 여러 서버에서 같은 갱신 시점이 필요해지면 공유 캐시를 검토한다.
-    private final ConcurrentHashMap<HotKey, HotEntry> hotCache = new ConcurrentHashMap<>();
+    // Weekly ranking scans orders by paid_at, which has no index yet.
+    private static final long WEEKLY_CACHE_TTL_NANOS = TimeUnit.SECONDS.toNanos(60);
+    // 서버(인스턴스)마다 따로 두는 캐시다. 여러 서버가 같은 시점에 갱신해야 하면 공유 캐시로 옮긴다.
+    private final ConcurrentHashMap<RankingKey, CacheEntry<WhatsHotResponse>> hotCache = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<RankingKey, CacheEntry<WeeklyRankingResponse>> weeklyCache = new ConcurrentHashMap<>();
 
-    private record HotKey(String category, Integer limit) {}
-    private record HotEntry(WhatsHotResponse response, long loadedAtNanos) {}
+    private record RankingKey(String category, Integer limit) {}
+    private record CacheEntry<T>(T value, long loadedAtNanos) {
+        boolean fresh(long ttlNanos) {
+            return System.nanoTime() - loadedAtNanos < ttlNanos;
+        }
+    }
+
+    /** Loads once per key and TTL; concurrent misses for the same key wait for one load. */
+    private static <T> T cached(ConcurrentHashMap<RankingKey, CacheEntry<T>> cache, RankingKey key,
+                                long ttlNanos, Supplier<T> loader) {
+        var entry = cache.get(key);
+        if (entry == null || !entry.fresh(ttlNanos)) {
+            entry = cache.compute(key, (ignored, previous) -> previous != null && previous.fresh(ttlNanos)
+                    ? previous : new CacheEntry<>(loader.get(), System.nanoTime()));
+        }
+        return entry.value();
+    }
 
     @GetMapping
     public ResponseEntity<?> getEvents(
@@ -74,17 +92,8 @@ public class EventController {
     }
 
     private WhatsHotResponse cachedHot(String category, Integer limit) {
-        var key = new HotKey(category, limit);
-        var entry = hotCache.get(key);
-        if (entry == null || System.nanoTime() - entry.loadedAtNanos() >= HOT_CACHE_TTL_NANOS) {
-            entry = hotCache.compute(key, (ignored, previous) -> {
-                if (previous != null && System.nanoTime() - previous.loadedAtNanos() < HOT_CACHE_TTL_NANOS) {
-                    return previous;
-                }
-                return new HotEntry(eventService.whatshot(category, limit), System.nanoTime());
-            });
-        }
-        return entry.response();
+        return cached(hotCache, new RankingKey(category, limit), HOT_CACHE_TTL_NANOS,
+                () -> eventService.whatshot(category, limit));
     }
 
     @GetMapping("/weekly-ranking")
@@ -92,13 +101,9 @@ public class EventController {
             @RequestParam(name = "category", required = false) String category,
             @RequestParam(name = "limit", required = false, defaultValue = "5") Integer limit
     ) {
-        var events = cachedHot(category, limit).events().stream()
-                .map(event -> new WeeklyRankingEventResponse(event.getRank(), event.getId(), event.getName(),
-                        event.getStartDate(), event.getEndDate(), event.getLocation(),
-                        event.getMainImageUrl(), event.getCategory()))
-                .toList();
-        return ApiResponse.success("주간 이벤트 순위 조회에 성공했습니다.",
-                new WeeklyRankingResponse(category, events));
+        return ApiResponse.success("주간 이벤트 순위 조회에 성공했습니다.", cached(weeklyCache,
+                new RankingKey(category, limit), WEEKLY_CACHE_TTL_NANOS,
+                () -> eventService.weeklyRanking(category, limit)));
     }
 
     @GetMapping("/{eventId}")

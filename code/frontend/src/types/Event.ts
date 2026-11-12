@@ -66,6 +66,20 @@ export type RankedEventsResponse<TEvent extends WeeklyRankedEvent> = {
   };
 };
 
+// WEEKLY: ranked by the last 7 days of sales. ALL_TIME: nothing sold this week, so cumulative sales.
+export type RankingPeriod = "WEEKLY" | "ALL_TIME";
+
+export type WeeklyRanking = {
+  category: EventCategory | null;
+  period: RankingPeriod;
+  events: WeeklyRankedEvent[];
+};
+
+export type WeeklyRankingResponse = {
+  message: string;
+  data: WeeklyRanking;
+};
+
 export type EventDetailApi = Omit<EventDetail, "runningTime"> & {
   runningTime?: number;
   running_time?: number;

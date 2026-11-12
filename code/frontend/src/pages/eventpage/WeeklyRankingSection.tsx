@@ -1,9 +1,16 @@
 import { Link } from "react-router-dom";
 
-import type { WeeklyRankedEvent } from "../../types/Event";
+import type { RankingPeriod, WeeklyRankedEvent } from "../../types/Event";
 
 type WeeklyRankingSectionProps = {
   events: WeeklyRankedEvent[];
+  period: RankingPeriod;
+};
+
+// The server falls back to cumulative sales when nothing sold this week; the labels must say which one is shown.
+const LABELS: Record<RankingPeriod, { eyebrow: string; title: string; first: string }> = {
+  WEEKLY: { eyebrow: "THIS WEEK", title: "WEEKLY RANKING", first: "이번 주 1위" },
+  ALL_TIME: { eyebrow: "ALL TIME", title: "BEST RANKING", first: "누적 판매 1위" },
 };
 
 function formatDate(value: string): string {
@@ -44,7 +51,9 @@ function formatEventPeriod(
 
 export default function WeeklyRankingSection({
   events,
+  period,
 }: WeeklyRankingSectionProps) {
+  const labels = LABELS[period];
 
   const rankingEvents = events.slice(0, 5);
 
@@ -60,11 +69,11 @@ export default function WeeklyRankingSection({
       {/* 제목 영역 */}
       <header className="mb-8">
         <p className="mb-2 text-sm font-bold tracking-[0.2em] text-[#f36f21]">
-          THIS WEEK
+          {labels.eyebrow}
         </p>
 
         <h2 className="text-[28px] font-extrabold tracking-[-0.5px] text-[#222222]">
-          WEEKLY RANKING
+          {labels.title}
         </h2>
       </header>
 
@@ -140,7 +149,7 @@ export default function WeeklyRankingSection({
           {/* 1위 정보 영역 */}
           <div className="flex min-w-0 flex-col justify-center p-7">
             <p className="mb-3 text-sm font-bold text-[#f36f21]">
-              이번 주 1위
+              {labels.first}
             </p>
 
             <h3 className="text-[24px] font-extrabold leading-[1.4] text-[#222222]">

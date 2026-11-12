@@ -6,6 +6,7 @@ import type {
   EventListResponse,
   HotEvent,
   RankedEventsResponse,
+  WeeklyRankingResponse,
 } from "../types/Event";
 
 type EventQuery = {
@@ -32,6 +33,15 @@ export async function getWhatsHot({ category, limit }: EventQuery = {}) {
   );
 
   return response.data.data.events;
+}
+
+export async function getWeeklyRanking({ category, limit }: EventQuery = {}) {
+  const response = await api.get<WeeklyRankingResponse>(
+    "/events/weekly-ranking",
+    { params: { category, limit } },
+  );
+
+  return response.data.data;
 }
 
 export async function getEventDetail(eventId: number) {

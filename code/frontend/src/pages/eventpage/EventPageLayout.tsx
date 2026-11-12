@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 
-import { getEvents, getWhatsHot } from "../../api/events";
+import { getEvents, getWeeklyRanking, getWhatsHot } from "../../api/events";
 import SlidePosts from "../../components/SlidePosts1";
 import type {
   EventCategory,
   EventSummary,
   HotEvent,
+  WeeklyRanking,
 } from "../../types/Event";
 import PosterSection from "./PosterSection";
 import WeeklyRankingSection from "./WeeklyRankingSection";
@@ -50,6 +51,8 @@ function EventPageContent({
   const [closingSoonEvents, setClosingSoonEvents] = useState<EventSummary[]>([]);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [hotEventsError, setHotEventsError] = useState<string | null>(null);
+  const [weeklyRanking, setWeeklyRanking] = useState<WeeklyRanking | null>(null);
+  const [weeklyRankingError, setWeeklyRankingError] = useState<string | null>(null);
   const [closingSoonError, setClosingSoonError] = useState<string | null>(null);
   const [eventsLoading, setEventsLoading] = useState(true);
   const [rankingsLoading, setRankingsLoading] = useState(true);
@@ -62,10 +65,11 @@ function EventPageContent({
     let active = true;
 
     const loadRankings = async () => {
-      const [closingSoonResult, whatsHotResult] =
+      const [closingSoonResult, whatsHotResult, weeklyResult] =
         await Promise.allSettled([
           getEvents(category, {}, { page: 0, size: 5, sort: "closingSoon" }),
           getWhatsHot({ category, limit: 5 }),
+          getWeeklyRanking({ category, limit: 5 }),
         ]);
 
       if (!active) {
@@ -85,6 +89,14 @@ function EventPageContent({
       } else {
         setHotEventsError(
           getErrorMessage(whatsHotResult.reason, "인기 이벤트를 불러오지 못했습니다."),
+        );
+      }
+
+      if (weeklyResult.status === "fulfilled") {
+        setWeeklyRanking(weeklyResult.value);
+      } else {
+        setWeeklyRankingError(
+          getErrorMessage(weeklyResult.reason, "주간 순위를 불러오지 못했습니다."),
         );
       }
 
@@ -157,10 +169,10 @@ function EventPageContent({
           </section>
 
           <section className="mb-24 bg-[#f7f7f7] py-20">
-            {hotEventsError ? (
-              <SectionMessage message={hotEventsError} error />
-            ) : hotEvents.length > 0 ? (
-              <WeeklyRankingSection events={hotEvents} />
+            {weeklyRankingError ? (
+              <SectionMessage message={weeklyRankingError} error />
+            ) : weeklyRanking && weeklyRanking.events.length > 0 ? (
+              <WeeklyRankingSection events={weeklyRanking.events} period={weeklyRanking.period} />
             ) : (
               <SectionMessage message="등록된 주간 순위가 없습니다." />
             )}

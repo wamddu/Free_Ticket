@@ -7,6 +7,7 @@ import org.springframework.data.domain.Slice;
 import org.springframework.stereotype.Repository;
 import wamddu.backend.event.domain.Event;
 import wamddu.backend.event.dto.response.EventSummaryResponse;
+import wamddu.backend.event.dto.response.WeeklyRankingEventResponse;
 import wamddu.backend.event.dto.response.WhatsHotEventResponse;
 
 import java.util.List;
@@ -76,5 +77,26 @@ public interface EventRepository extends JpaRepository<Event,Long> {
             "JOIN Event E ON E.id = R.eventId " +
             "ORDER BY R.soldCount DESC, R.eventEndDate ASC, R.eventId ASC")
     List<WhatsHotEventResponse> whatshot(String category, Integer limit);
+
+    // Tickets paid in [from, to). A pending cancellation still counts until the refund is confirmed,
+    // matching OrderRepository.sumPaidQuantity used by automatic pricing.
+    @Query("SELECT new wamddu.backend.event.dto.response.WeeklyRankingEventResponse(" +
+            "R.rankValue, E.id, E.name, E.startDate, E.endDate, E.location, E.mainImageUrl, E.category) " +
+            "FROM (SELECT S.id AS eventId, S.endDate AS eventEndDate, SUM(O.quantity) AS soldCount, " +
+            "DENSE_RANK() OVER (ORDER BY SUM(O.quantity) DESC) AS rankValue " +
+            "FROM Order O JOIN Event S ON S.id = O.event_id " +
+            "WHERE O.paidAt >= :from AND O.paidAt < :to " +
+            "AND (O.status = wamddu.backend.order.domain.OrderStatus.PAID " +
+            "OR (O.status = wamddu.backend.order.domain.OrderStatus.CANCELING " +
+            "AND EXISTS (SELECT P.id FROM Payment P WHERE P.order = O AND P.status = 'DONE'))) " +
+            "AND (:category IS NULL OR S.category = :category) " +
+            "GROUP BY S.id, S.endDate " +
+            "ORDER BY soldCount DESC, S.endDate ASC, S.id ASC LIMIT :limit) R " +
+            "JOIN Event E ON E.id = R.eventId " +
+            "ORDER BY R.soldCount DESC, R.eventEndDate ASC, R.eventId ASC")
+    List<WeeklyRankingEventResponse> weeklyRanking(@Param("category") String category,
+                                                   @Param("from") LocalDateTime from,
+                                                   @Param("to") LocalDateTime to,
+                                                   @Param("limit") Integer limit);
 
 }
