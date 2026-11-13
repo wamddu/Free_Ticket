@@ -86,7 +86,7 @@ stateDiagram-v2
 | 원래 승인 요청과 복구가 겹침 | 재고를 한 번만 차감 | `PaymentRecoverySchedulerIntegrationTest.originalApprovalAndRecoveryDoNotDoubleSell` |
 | 취소 응답 유실 | 같은 취소 멱등 키로 재시도하고 조회로 확정 | `ReservationCancellationIntegrationTest.lostProviderResponseIsRecoveredFromCommittedCancellationIntent` |
 | 같은 예매를 동시에 두 번 취소 | 재고를 한 번만 반환 | `ReservationCancellationIntegrationTest.concurrentRequestsCannotRestoreInventoryTwice` |
-| 마지막 1장에 100명이 동시 주문 (MySQL) | 티켓 행 비관적 잠금으로 1명만 성공 | `LastTicketConcurrencyTest.oneRemainingTicketVsOneHundredBuyers` |
+| 마지막 1장에 100명이 동시 주문 (MySQL) | 잠금이 있었는데도 100건이 생성되던 버그를 고침. 잠금 전 일반 조회가 REPEATABLE READ의 읽기 시점을 고정해 이전 데이터로 수량을 계산했으므로, 티켓 잠금을 트랜잭션의 첫 조회로 옮김 → 1건만 성공 ([기록](docs/reports/2026-09-25-last-ticket-concurrency.md)) | `LastTicketConcurrencyTest.oneRemainingTicketVsOneHundredBuyers` |
 | 존재하지 않는 결제 키로 재고를 계속 점유 | 3회 이상 조회해도 없고 기한+10분이 지나면 결제 실패로 확정해 재고 해제 | `InventoryHoldIntegrationTest.unknownPaymentKeyIsFailedAfterGraceAndReleasesTheTicket` |
 | 한 사용자가 재고를 대량 점유 | 티켓당 미결제 점유 10장 제한 | `InventoryHoldIntegrationTest.oneUserCannotHoldMoreThanTenOfATicket` |
 | 토스 쪽에서만 취소·부분 취소된 거래 | 거래 내역을 주기적으로 대조(설정으로 켬)해 불일치로 기록하고 관리자가 처리 | `PaymentReconciliationIntegrationTest.cancellationAndTwoPartialTransactionsAreRecordedOnceWithoutChangingBooking` |
@@ -94,19 +94,25 @@ stateDiagram-v2
 
 ## 성능 측정과 개선
 
-측정 → 병목 확인 → 개선 → 재측정 순서로 진행했다. 데이터는 공연 96·500·1,000개 세 규모, 도구는 Java 부하 생성기와 k6를 썼다. 서버 쪽은 JMX(스레드·DB 연결), MySQL `performance_schema`(SQL 실행 횟수·시간), TCP 카운터를 함께 기록했다.
+측정 → 병목 확인 → 개선 → 같은 조건으로 재측정 순서로 진행했다. 서버 쪽은 JMX(스레드·DB 연결), MySQL `performance_schema`(SQL 실행 횟수·시간), 실행 계획, TCP 카운터를 함께 기록했다.
 
-| 단계 | 확인한 것 | 한 일 | 결과 |
+| 시기 | 확인한 것 | 한 일 | 결과 |
 |---|---|---|---|
-| 1. HOT API 단독 측정 | 공연 수가 96→1,000개로 늘면 p95가 119→641ms로 증가 | 순위 계산에는 ID·종료일·판매량만 쓰고, 상위 N개를 고른 뒤 상세 정보를 읽도록 쿼리 변경 | 같은 조건에서 번갈아 3회씩 측정한 중앙값 기준 p95 −14%, 처리량 575→870 req/s(+51%). 결과가 바이트 단위로 같은지 확인 |
-| 2. 단계별 부하 | 1,500 req/s에서 작업 스레드 200/200 포화, DB 연결 10개를 최대 190개 요청이 기다림. 같은 결과를 요청마다 다시 계산 | HOT 응답 5초 캐시. 만료 순간 동시에 들어온 요청도 한 번만 계산 | 1,000 req/s×10초에서 HOT SQL 실행 9,974→2회, DB 연결 대기 190→0. 1,500 req/s 성공률 82%→100% |
-| 3. 연결 실패 원인 분리 | 실패는 SQL 오류가 아니라 연결 시간 초과. keep-alive 연결이 슬롯 8,192개를 점유하고 TCP 접속 대기열(100)이 넘침 | 설정을 하나씩 바꾸는 비교(최대 연결 수, 접속 대기열, keep-alive)와 CPU·DB 부하 없는 재현 시험 | 접속 대기열을 100→2,048로 늘린 경우만 대기열 넘침이 크게 줄었다(4,403→0회, 생성기 4대 동시 시험 6,355→1,049회). 최대 연결 수 상향은 효과가 없었고 keep-alive 단축은 악화. 아직 운영 설정에는 반영하지 않았다 |
-| 4. EC2 배포 서버 측정 | 1만 요청/1초 시험에서 부하 생성기 PC의 로컬 포트가 먼저 고갈 | 생성기 쪽 한계(포트 충돌, 실제 발송 시간)를 결과와 분리해 기록 | "1만 명/1초 처리"는 이 장비로 검증할 수 없다고 판단하고 주장하지 않음 |
-| 5. 화면 단위 측정 | 장르 화면은 API 4개를 동시에 호출. 같은 부하에서 메인 화면 p95 417ms, 장르 화면 3,634ms. 주간 순위 SQL이 방문마다 실행(누적 41,288회·371초), 목록은 페이지 없이 전체를 내려줌(1,000개 기준 78KB) | 주간 순위의 중복 조회 제거와 캐시, 목록 페이지 나누기(30개, 다음 페이지 유무는 한 행 더 읽어 판단), 목록 Redis 캐시(30초, 캐시 미스 시 한 번만 조회, Redis 장애 시 DB로 대체) | 반영 후 같은 시나리오로 다시 측정하지는 못했다 |
+| 9월 | 예매 내역이 예매 건마다 티켓을 다시 조회(N+1) | 불필요한 보완 조회 제거, `IN` 일괄 조회 | 서비스 조회 1+N회 → **최대 2회** ([기록](docs/reports/2026-09-15-reservation-list-n-plus-1.md)) |
+| 9월 | 인기 공연(HOT): 공연 96→1,000개에서 p95 119→641ms. 1,500 req/s에서 스레드 200/200 포화, DB 연결 대기 190 | 순위 계산 쿼리 구조 변경, 5초 캐시(만료 순간 동시 요청도 한 번만 계산) | 처리량 +51%, 같은 부하에서 집계 SQL **9,974 → 2회**, DB 대기 **190 → 0** ([기록](docs/reports/2026-09-24-hot-api-performance.md)) |
+| 9월 | 집중 요청 실패는 SQL 오류가 아니라 연결 시간 초과 | 설정을 하나씩 바꾸는 비교와 CPU·DB 부하 없는 재현 | keep-alive 연결의 슬롯 점유와 TCP 접속 대기열 넘침을 원인으로 확인 |
+| 9월 | 화면 단위로 측정하니 장르 화면이 병목. 주간 순위가 방문마다 집계, 목록은 전체를 반환 | 아래 10~11월 작업으로 이어짐 | ([기록](docs/reports/2026-09-25-page-api-performance.md)) |
+| 10월 | 예매 가능 검색이 8초 안에 끝나지 않음. 주문 테이블 전체 스캔, 요청당 1,446만~3,223만 행 읽음 | `orders(ticket_id)` 인덱스 | 예매 가능 검색 성공 **0% → 100%**(동시 50·100명), 주문 생성 p95 **4.9 → 0.8초**(50명) ([기록](docs/reports/2026-10-31-orders-ticket-index.md)) |
+| 10월 | 전화번호 중복 확인과 리프레시 토큰 조회에 인덱스가 없음 | 전화번호, 리프레시 토큰 만료 시각·사용자 인덱스 | 전화번호 수정 p95 **5.6 → 2.4초**(100명) ([기록](docs/reports/2026-10-31-auth-indexes.md)) |
+| 11월 | 로그인마다 만료 토큰 전체 삭제를 실행해 데드락과 실패 발생 | 삭제를 스케줄러로 분리, 1,000건씩 처리 | 로그인 성공률 90.7% → **100%**, 데드락 로그 사라짐(50명) ([기록](docs/reports/2026-11-01-token-cleanup.md)) |
+| 11월 | 로그인이 여전히 느린 원인 | 프로파일링과 조건 분리 | BCrypt 검증이 스레드 CPU 시간의 87.5%. CPU를 4배로 늘리면 p95 3.5배 개선, 연결 풀 확대는 8%. DB 문제가 아님을 확인 ([기록](docs/reports/2026-11-01-login-bottleneck.md)) |
+| 11월 | 공연 목록이 3,500개 전체(1.15MB)를 반환 | 30개씩 페이지 나누기 | 응답 **1.15MB → 5KB**, p95 약 70% 감소(반환 개수가 3,500 → 30개로 달라 같은 작업의 속도 비교는 아님) ([기록](docs/reports/2026-11-01-event-list-pagination.md)) |
+| 11월 | 같은 목록을 요청마다 DB에서 읽고 JSON으로 만듦 | Redis 캐시 30초(캐시 미스 시 한 번만 조회, Redis 장애 시 DB로 대체) | 동시 500명 성공률 **59% → 100%**, 100명 p95 14.5 → 2.2초 ([기록](docs/reports/2026-11-01-redis-list-cache.md)) |
+| 11/14 | 9월 화면 측정과 같은 시나리오로 9월 버전과 현재 버전 비교 | 같은 데이터에서 번갈아 반복 측정 | 1초 1,000명: 순위 SQL **757 → 7회**, 목록 SQL **749 → 0회**, 장르 화면 p95 1,570 → 1,043ms. 20초 1만 명: DB 시간 **40.5 → 1.3초**, API p95 660 → 406ms ([기록](docs/reports/2026-11-14-page-api-remeasure.md)) |
 
-그 밖에 로그인 때마다 실행되던 만료 리프레시 토큰 삭제를 스케줄러로 옮기고 1,000건씩 나눠 지우게 했다. 주간 랭킹 조회용 `orders (status, paid_at)` 인덱스도 추가했다.
+**남은 병목:** 11/14 재측정에서 20초 동안 1만 명이 방문하면 기본 설정으로는 두 버전 모두 화면의 약 20%가 시간 초과로 실패했다. 서버 연결 한도(8,192)만 올리면 둘 다 100% 성공해서, 원인은 코드가 아니라 연결 설정이었다. 운영 설정은 메모리와 스레드 사용량을 함께 확인한 뒤 바꿀 예정이다.
 
-**한계:** 부하 생성기와 서버가 같은 PC에 있거나(로컬), 생성기 PC 한 대에서 보낸(EC2) 측정이다. 그래서 응답 시간의 절대값보다 **SQL 실행 횟수, DB 연결 대기 같은 서버 작업량의 변화**를 개선 근거로 삼았다. 자세한 조건과 수치: [HOT API 보고서](docs/reports/2026-09-24-hot-api-performance.md), [화면 단위 보고서](docs/reports/2026-09-25-page-api-performance.md)
+**한계:** 부하 생성기와 서버가 같은 PC를 쓰거나(로컬), 생성기 PC 한 대에서 보낸(EC2) 측정이다. 그래서 응답 시간의 절대값보다 **SQL 실행 횟수, DB 시간, 성공률 같은 서버 쪽 변화**를 개선 근거로 삼았다. 또 측정마다 데이터 규모와 자원 제한(예: 앱·DB 각 0.5 CPU)이 달라서, 서로 다른 행의 수치를 직접 비교하지 않는다.
 
 ## 테스트와 CI
 
@@ -148,4 +154,5 @@ npm run dev                 # http://localhost:5173
 
 - [데이터베이스 설계](docs/database.md): ERD, 제약 조건, 동시성, 스키마 변경 방법
 - [배포](docs/deploy.md): EC2 배포·재배포·복구
-- 보고서: [HOT API 성능 측정](docs/reports/2026-09-24-hot-api-performance.md), [화면 단위 성능 측정](docs/reports/2026-09-25-page-api-performance.md), [결제 대사 실연동 검증](docs/reports/2026-09-28-payment-reconciliation-toss-test.md), [관리자 결제 처리](docs/reports/2026-09-29-admin-payment-operations.md)
+- 장애 대응: [결제 복구 설계](docs/reports/2026-09-19-payment-recovery.md), [복구 스케줄러](docs/reports/2026-09-20-payment-recovery-scheduler.md), [마지막 티켓 동시 주문](docs/reports/2026-09-25-last-ticket-concurrency.md), [결제 대사 실연동 검증](docs/reports/2026-09-28-payment-reconciliation-toss-test.md), [관리자 결제 처리](docs/reports/2026-09-29-admin-payment-operations.md)
+- 성능: [예매 내역 N+1](docs/reports/2026-09-15-reservation-list-n-plus-1.md), [HOT API](docs/reports/2026-09-24-hot-api-performance.md), [화면 단위 측정](docs/reports/2026-09-25-page-api-performance.md), [10월 종합 측정](docs/reports/2026-10-31-local-performance-baseline.md), [주문 인덱스](docs/reports/2026-10-31-orders-ticket-index.md), [인증 인덱스](docs/reports/2026-10-31-auth-indexes.md), [로그인 병목](docs/reports/2026-11-01-login-bottleneck.md), [토큰 정리 분리](docs/reports/2026-11-01-token-cleanup.md), [목록 페이지 나누기](docs/reports/2026-11-01-event-list-pagination.md), [Redis 목록 캐시](docs/reports/2026-11-01-redis-list-cache.md), [화면 단위 재측정](docs/reports/2026-11-14-page-api-remeasure.md)
