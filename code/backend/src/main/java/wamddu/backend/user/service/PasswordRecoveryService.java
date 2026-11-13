@@ -18,6 +18,7 @@ public class PasswordRecoveryService {
     private final UserRepository users;
     private final PasswordEncoder encoder;
     private final RefreshTokenStore refreshTokens;
+    private final DemoAccounts demoAccounts;
 
     @Transactional
     public void reset(String email, String token, String password, String confirmation) {
@@ -28,6 +29,7 @@ public class PasswordRecoveryService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "PASSWORD_MISMATCH", "비밀번호 확인이 일치하지 않습니다.");
         }
         email = EmailVerificationService.normalizeEmail(email);
+        demoAccounts.requireChangeable(email);
         // All account writes lock user before verification, preventing stale profile writes and lock inversion.
         var user = users.findByEmail(email);
         // Verification consumption and password update commit together; failures leave the proof usable.

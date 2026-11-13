@@ -31,7 +31,7 @@ class AdminTableControllerTest {
 
     @BeforeEach
     void setUp() {
-        mvc = MockMvcBuilders.standaloneSetup(new AdminTableController(service, users))
+        mvc = MockMvcBuilders.standaloneSetup(new AdminTableController(service, users, new wamddu.backend.user.service.DemoAccounts("")))
                 .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .setControllerAdvice(new ApiExceptionHandler()).build();
     }

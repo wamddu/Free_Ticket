@@ -46,6 +46,38 @@ public class AdminTableService {
         public TablePage(String table, List<String> columns, List<List<String>> rows, long totalRows, int page, int size) {
             this(table, columns, rows, totalRows, page, size, List.of());
         }
+
+        /** Copy for a demo administrator: members' contact details and names are masked, the rest is unchanged. */
+        public TablePage maskPersonalData() {
+            if (!table.equals("users")) {
+                return this;
+            }
+            List<List<String>> masked = rows.stream().map(row -> {
+                var values = new ArrayList<>(row);
+                for (int i = 0; i < columns.size(); i++) {
+                    if (values.get(i) != null) {
+                        values.set(i, mask(columns.get(i).toLowerCase(java.util.Locale.ROOT), values.get(i)));
+                    }
+                }
+                return (List<String>) values;
+            }).toList();
+            return new TablePage(table, columns, masked, totalRows, page, size, createFields);
+        }
+
+        private static String mask(String column, String value) {
+            return switch (column) {
+                case "email" -> {
+                    int at = value.indexOf('@');
+                    yield at < 0 ? "***" : value.substring(0, Math.min(2, at)) + "***" + value.substring(at);
+                }
+                case "phonenumber" -> value.length() <= 4 ? "***"
+                        : "*".repeat(value.length() - 4) + value.substring(value.length() - 4);
+                case "username" -> value.isEmpty() ? value
+                        : value.substring(0, value.offsetByCodePoints(0, 1)) + "**";
+                case "customer_key" -> "***";
+                default -> value;
+            };
+        }
     }
 
     private List<CreateField> createFields(String table) {

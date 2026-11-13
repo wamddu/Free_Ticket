@@ -6,6 +6,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import wamddu.backend.global.response.ApiResponse;
 import wamddu.backend.user.repository.UserRepository;
+import wamddu.backend.user.service.DemoAccounts;
 
 import java.util.List;
 
@@ -15,6 +16,7 @@ import java.util.List;
 public class AdminTableController {
     private final AdminTableService service;
     private final UserRepository userRepository;
+    private final DemoAccounts demoAccounts;
 
     public record UpdateRequest(List<AdminTableService.RowChange> changes,
                                 List<java.util.Map<String, String>> creations,
@@ -27,7 +29,7 @@ public class AdminTableController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "100") int size,
             @RequestBody UpdateRequest request) {
-        AdminAccess.requireAdmin(principal, userRepository);
+        demoAccounts.requireChangeable(AdminAccess.requireAdmin(principal, userRepository));
         return ApiResponse.success("변경 사항을 저장했습니다.", service.save(table, request.changes(), request.creations(), request.deletions(), page, size));
     }
 
@@ -43,7 +45,8 @@ public class AdminTableController {
             @PathVariable String table,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "100") int size) {
-        AdminAccess.requireAdmin(principal, userRepository);
-        return ApiResponse.success(service.read(table, page, size));
+        var admin = AdminAccess.requireAdmin(principal, userRepository);
+        var result = service.read(table, page, size);
+        return ApiResponse.success(demoAccounts.isDemo(admin) ? result.maskPersonalData() : result);
     }
 }

@@ -8,6 +8,9 @@ services:
     environment:
       DB_URL: jdbc:mysql://mysql-db:3306/free_ticket?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
+      # Local only: also load the demo events, tickets and accounts (db/seed). The server never sets this.
+      SPRING_FLYWAY_LOCATIONS: classpath:db/migration,classpath:db/seed
+      DEMO_ACCOUNT_EMAILS: user@example.com,admin@example.com
       SPRING_JPA_SHOW_SQL: "false"
       EVENT_LIST_CACHE_ENABLED: "true"
       REDIS_HOST: redis

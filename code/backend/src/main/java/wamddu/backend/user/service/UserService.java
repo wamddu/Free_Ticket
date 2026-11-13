@@ -36,6 +36,7 @@ public class UserService {
     private final JwtProvider jwtProvider;
     private final RefreshTokenStore refreshTokenStore;
     private final EmailVerificationService emailVerificationService;
+    private final DemoAccounts demoAccounts;
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final Base64.Encoder URL_ENCODER = Base64.getUrlEncoder().withoutPadding();
 
@@ -170,6 +171,8 @@ public class UserService {
             throw new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
         }
 
+        demoAccounts.requireChangeable(user);
+
         if (request.getEmail() != null && !request.getEmail().equalsIgnoreCase(user.getEmail())) {
             String email = EmailVerificationService.normalizeEmail(request.getEmail());
             if (userRepository.existsByEmail(email)) {
@@ -208,6 +211,8 @@ public class UserService {
             throw new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
         }
 
+        demoAccounts.requireChangeable(user);
+
         if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_CURRENT_PASSWORD", "현재 비밀번호가 올바르지 않습니다.");
         }
@@ -232,6 +237,8 @@ public class UserService {
         if (user.getStatus() != UserStatus.ACTIVE) {
             throw new ApiException(HttpStatus.NOT_FOUND, "USER_NOT_FOUND", "사용자를 찾을 수 없습니다.");
         }
+
+        demoAccounts.requireChangeable(user);
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_PASSWORD", "비밀번호가 올바르지 않습니다.");

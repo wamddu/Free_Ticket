@@ -49,6 +49,8 @@ class UserServiceTest {
     private RefreshTokenStore refreshTokenStore;
     @Mock
     private EmailVerificationService emailVerificationService;
+    @org.mockito.Spy
+    private DemoAccounts demoAccounts = new DemoAccounts("");
 
     @InjectMocks
     private UserService userService;
