@@ -1,6 +1,4 @@
-CREATE DATABASE IF NOT EXISTS `free_ticket`
-  DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-USE `free_ticket`;
+-- Flyway 도입 전까지 backup.sql에 있던 테이블 구조. 이미 운영 중인 DB에는 실행하지 않고 적용된 것으로 기록만 한다(baseline).
 
 CREATE TABLE `users` (
                          `id` bigint NOT NULL AUTO_INCREMENT,
@@ -15,7 +13,7 @@ CREATE TABLE `users` (
                          PRIMARY KEY (`id`),
                          UNIQUE KEY `UK6dotkott2kjsp8vw4d0m25fb7` (`email`),
                          KEY `idx_users_phonenumber` (`phonenumber`)
-) ENGINE=InnoDB AUTO_INCREMENT=2
+) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE email_verifications (
@@ -56,7 +54,7 @@ CREATE TABLE `events` (
                           `main_image_url` varchar(255) NOT NULL,
                           `name` varchar(255) NOT NULL,
                           PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=617
+) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `event_directors` (
@@ -90,7 +88,7 @@ CREATE TABLE `tickets` (
                            PRIMARY KEY (`id`),
                            CONSTRAINT `FK3utafe14rupaypjocldjaj4ol`
                                FOREIGN KEY (`event_id`) REFERENCES `events` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=164
+) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `ticket_price_history` (
@@ -128,7 +126,7 @@ CREATE TABLE `orders` (
                           KEY `idx_orders_ticket_id` (`ticket_id`),
                           CONSTRAINT `FK32ql8ubntj5uh44ph9659tiih`
                               FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=6
+) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE payment_reconciliation_issue (
@@ -191,5 +189,5 @@ CREATE TABLE `payments` (
                             UNIQUE KEY `UK8vo36cen604as7etdfwmyjsxt` (`order_id`),
                             CONSTRAINT `FK81gagumt0r8y3rmudcgpbk42l`
                                 FOREIGN KEY (`order_id`) REFERENCES `orders` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=6
+) ENGINE=InnoDB
   DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

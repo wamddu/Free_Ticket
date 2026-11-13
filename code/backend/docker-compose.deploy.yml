@@ -71,7 +71,6 @@ services:
       - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./backup.sql:/docker-entrypoint-initdb.d/backup.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysql -h 127.0.0.1 -u root -D free_ticket -e 'SELECT 1' >/dev/null 2>&1"]
       interval: 5s

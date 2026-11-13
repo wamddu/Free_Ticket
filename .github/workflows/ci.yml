@@ -20,7 +20,7 @@ jobs:
     env:
       # Same zone as the deployed containers; the code uses LocalDateTime.now().
       TZ: Asia/Seoul
-      # Enables the MySQL-only tests: 100 buyers vs the last ticket, and backup.sql schema validation.
+      # Enables the MySQL-only tests: 100 buyers vs the last ticket, and the Flyway migrations on an empty database.
       RUN_MYSQL_CONCURRENCY: "true"
     services:
       mysql:
@@ -46,9 +46,6 @@ jobs:
           java-version: "21"
 
       - uses: gradle/actions/setup-gradle@v5
-
-      - name: Create the deploy schema from backup.sql
-        run: mysql -h 127.0.0.1 -P 3308 -uroot -pconcurrency-test < backup.sql
 
       - name: Run tests
         run: ./gradlew test --no-daemon
