@@ -6,6 +6,8 @@
 
 **배포:** https://13-209-194-94.sslip.io (토스 테스트 모드, 실제 결제되지 않음)
 
+**운영 모니터링:** [Grafana 대시보드](https://13-209-194-94.sslip.io/grafana/d/free-ticket) (로그인 없이 보기만 가능) · [상태 확인](https://13-209-194-94.sslip.io/health)
+
 | 체험 계정 | 이메일 | 비밀번호 | 할 수 있는 것 |
 |---|---|---|---|
 | 사용자 | `user@example.com` | `password123!` | 공연 조회, 예매, 테스트 결제·취소 |
@@ -19,7 +21,7 @@
 
 - **기간:** 2026.05 ~ (4인 팀)
 - **담당:** 백엔드 전반
-- **2026.11 개선:** 장애 대응 보강, CI 구축, Flyway 도입, 체험 계정 보호, 문서화 ([개선 내역](#개선-내역-202611))
+- **2026.11 개선:** 장애 대응 보강, CI 구축, Flyway 도입, 체험 계정 보호, 모니터링, 문서화 ([개선 내역](#개선-내역-202611))
 
 ## 기술 스택
 
@@ -30,6 +32,7 @@
 | 외부 연동 | 토스페이먼츠(결제·취소·거래 조회), 네이버 SMTP(메일 인증), Gemini(AI 공연 검색), 네이버 지도 |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS, Vitest |
 | 인프라 | AWS EC2, Docker Compose, Caddy(HTTPS·리버스 프록시), GitHub Actions |
+| 모니터링 | Spring Boot Actuator, Micrometer, Prometheus, Grafana, UptimeRobot(외부 감시) |
 
 ## 구성
 
@@ -42,6 +45,9 @@ flowchart LR
     S -->|승인·취소·조회| T[토스페이먼츠]
     S --> E[네이버 SMTP]
     S --> G[Gemini]
+    P[Prometheus] -->|15초마다 수집<br/>내부 포트 8081| S
+    C -->|/grafana| GF[Grafana] --> P
+    U[UptimeRobot] -->|5분마다 /health| C
 ```
 
 ## 주요 기능
@@ -116,9 +122,18 @@ stateDiagram-v2
 
 **한계:** 부하 생성기와 서버가 같은 PC를 쓰거나(로컬), 생성기 PC 한 대에서 보낸(EC2) 측정이다. 그래서 응답 시간의 절대값보다 **SQL 실행 횟수, DB 시간, 성공률 같은 서버 쪽 변화**를 개선 근거로 삼았다. 또 측정마다 데이터 규모와 자원 제한(예: 앱·DB 각 0.5 CPU)이 달라서, 서로 다른 행의 수치를 직접 비교하지 않는다.
 
+## 모니터링
+
+- **대시보드:** API 초당 요청·5xx 비율·p95 응답 시간, Tomcat 연결·스레드, DB 커넥션 풀, JVM 힙·GC·CPU, 결제 승인 결과
+- **결제 지표:** 복구를 기다리는 결제, 재시도를 다 써서 사람이 봐야 하는 결제, 토스 취소 내역과 DB가 어긋난 미해결 건을 직접 만든 지표로 보여 준다. 위 결제 상태 설계가 운영 중에 잘 돌아가는지 확인하는 용도다.
+- **Tomcat 연결 수:** 성능 측정에서 찾은 남은 병목(연결 한도 8,192)을 그래프로 지켜본다.
+- **노출 범위:** 메트릭은 관리 포트(8081)에서만 나오고 외부로 프록시하지 않는다. 바깥에는 `UP`/`DOWN`만 알려 주는 `/health`와 보기 전용 Grafana만 연다.
+- **외부 감시:** Prometheus는 같은 서버에 있어 서버 전체가 멈추면 알리지 못한다. 그래서 UptimeRobot이 바깥에서 5분마다 `/health`를 확인하고 메일로 알린다.
+- 대시보드와 수집 설정은 파일([monitoring](code/backend/monitoring))로 관리해 서버를 새로 띄워도 같은 화면이 나온다.
+
 ## 테스트와 CI
 
-- 백엔드 테스트 365개. H2 단위·통합 테스트에 더해 **MySQL 8.0 컨테이너에서** 동시성 테스트와 마이그레이션 검증을 실행한다.
+- 백엔드 테스트 369개. H2 단위·통합 테스트에 더해 **MySQL 8.0 컨테이너에서** 동시성 테스트와 마이그레이션 검증을 실행한다.
 - GitHub Actions가 main 푸시와 PR마다 백엔드 테스트와 프론트 린트·테스트·빌드를 실행한다.
 - `FlywayMigrationTest`가 빈 MySQL에 모든 마이그레이션을 적용한 뒤, 엔티티와 테이블이 일치하는지 검사한다.
 
@@ -132,6 +147,7 @@ stateDiagram-v2
 - **주간 랭킹:** 누적 판매량으로 집계하던 것을 최근 7일 결제 수량 기준으로 바꿨다. 최근 판매가 없으면 누적 순위로 대신 보여 주고, 화면에 그 사실을 표시한다.
 - **CI 구축**과 **Flyway 도입:** 운영 DB는 구조 비교 → baseline으로 데이터 변경 없이 전환했다.
 - **공개 체험 계정 보호**와 **로컬 데모 데이터:** 데모 데이터는 실행일 기준 날짜로 만든다.
+- **모니터링:** Prometheus·Grafana로 API, 서버 자원, 결제 복구 상태를 보고, UptimeRobot으로 바깥에서 서버가 살아 있는지 확인한다.
 
 ## 로컬 실행
 
@@ -155,6 +171,6 @@ npm run dev                 # http://localhost:5173
 ## 문서
 
 - [데이터베이스 설계](docs/database.md): ERD, 제약 조건, 동시성, 스키마 변경 방법
-- [배포](docs/deploy.md): EC2 배포·재배포·복구
+- [배포](docs/deploy.md): EC2 배포·재배포·복구·모니터링
 - 장애 대응: [결제 복구 설계](docs/reports/2026-09-19-payment-recovery.md), [복구 스케줄러](docs/reports/2026-09-20-payment-recovery-scheduler.md), [마지막 티켓 동시 주문](docs/reports/2026-09-25-last-ticket-concurrency.md), [결제 대사 실연동 검증](docs/reports/2026-09-28-payment-reconciliation-toss-test.md), [관리자 결제 처리](docs/reports/2026-09-29-admin-payment-operations.md)
 - 성능: [예매 내역 N+1](docs/reports/2026-09-15-reservation-list-n-plus-1.md), [HOT API](docs/reports/2026-09-24-hot-api-performance.md), [화면 단위 측정](docs/reports/2026-09-25-page-api-performance.md), [10월 종합 측정](docs/reports/2026-10-31-local-performance-baseline.md), [주문 인덱스](docs/reports/2026-10-31-orders-ticket-index.md), [인증 인덱스](docs/reports/2026-10-31-auth-indexes.md), [로그인 병목](docs/reports/2026-11-01-login-bottleneck.md), [토큰 정리 분리](docs/reports/2026-11-01-token-cleanup.md), [목록 페이지 나누기](docs/reports/2026-11-01-event-list-pagination.md), [Redis 목록 캐시](docs/reports/2026-11-01-redis-list-cache.md), [화면 단위 재측정](docs/reports/2026-11-14-page-api-remeasure.md)
