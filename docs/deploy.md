@@ -6,8 +6,11 @@
 
 ```
 브라우저 ──HTTPS──▶ web (Caddy: 정적 파일 + /api 프록시, 인증서 자동 발급)
-                      └──▶ backend (Spring Boot) ──▶ mysql-db (MySQL 8.0, 볼륨 mysql_data)
-                                               └──▶ redis (공연 목록 캐시)
+                      ├──▶ backend :8080 (Spring Boot) ──▶ mysql-db (MySQL 8.0, 볼륨 mysql_data)
+                      │                               └──▶ redis (공연 목록 캐시)
+                      ├──▶ backend :8081 /actuator/health   (/health 경로만)
+                      └──▶ grafana (/grafana) ──▶ prometheus ──15초마다 수집──▶ backend :8081 /actuator/prometheus
+외부 감시: UptimeRobot ──5분마다──▶ https://<PUBLIC_HOST>/health
 ```
 
 - 설정 파일: `code/backend/docker-compose.deploy.yml`, 비밀 값: 같은 폴더의 `.env.deploy`(Git에 올리지 않음)
@@ -33,6 +36,7 @@ Ubuntu 24.04, 메모리 4GB, 디스크 30GB 기준이다.
    - DB 비밀번호 두 개는 서로 다르게, `JWT_SECRET`은 `openssl rand -hex 32` 값
    - 토스 테스트 키, 네이버 지도 클라이언트 ID, 메일 발송용 네이버 계정과 앱 비밀번호
    - `DEMO_ACCOUNT_EMAILS`: README에 공개한 체험 계정 이메일. 비우면 체험 계정 보호가 꺼진다.
+   - `GRAFANA_ADMIN_PASSWORD`: Grafana 관리자(`admin`) 비밀번호. Grafana를 처음 띄울 때만 쓰인다. 이후 변경은 Grafana 화면에서 한다.
 
 3. 시작한다. 빈 DB에는 Flyway가 테이블을 만든다(공연 데이터는 없음).
 
@@ -59,7 +63,7 @@ Ubuntu 24.04, 메모리 4GB, 디스크 30GB 기준이다.
    git status --short
    ```
 
-3. 최신 코드를 받고 바뀐 서비스를 다시 빌드한다. 프론트가 바뀌었으면 `web`도 넣는다.
+3. 최신 코드를 받고 바뀐 서비스를 다시 빌드한다. 프론트나 `Caddyfile`이 바뀌었으면 `web`도 넣는다. 서비스가 새로 추가된 경우(예: 모니터링)는 서비스 이름 없이 `up -d --build`로 전체를 올린다.
 
    ```sh
    git fetch origin && git reset --hard origin/main
@@ -71,6 +75,27 @@ Ubuntu 24.04, 메모리 4GB, 디스크 30GB 기준이다.
    ```sh
    sudo docker compose --env-file .env.deploy -f docker-compose.deploy.yml logs backend | grep -iE "flyway|migrat|Started BackendApplication|ERROR" | tail -20
    ```
+
+## 모니터링
+
+| 주소 | 내용 | 공개 범위 |
+|---|---|---|
+| `https://<PUBLIC_HOST>/grafana` | 대시보드 "Free Ticket 운영 현황" | 로그인 없이 보기만 가능. 수정은 `admin` 로그인 |
+| `https://<PUBLIC_HOST>/health` | 백엔드 상태 `UP`/`DOWN`만 | 공개 (외부 감시용) |
+| `backend:8081/actuator/prometheus` | 메트릭 원본 | Docker 네트워크 안에서만. Caddy가 넘기지 않는다 |
+
+- 대시보드와 데이터 소스는 `code/backend/monitoring/`의 파일로 만든다. 서버를 새로 띄워도 같은 화면이 나온다. 화면에서 고친 내용은 저장되지 않으므로 JSON 파일을 고쳐 커밋한다.
+- Prometheus는 7일 또는 1GB까지만 보관한다(볼륨 `prometheus_data`). 메모리 상한은 Prometheus 512MB, Grafana 256MB다.
+- 패널: 서버 상태, 초당 요청, 5xx 비율, p95 응답 시간, Tomcat 연결·스레드, DB 커넥션 풀, JVM 힙·GC·CPU, 결제 승인 결과, 결제 복구 대기·사람 확인 필요 건수
+- 결제 지표 `freeticket_payments_*`는 Prometheus가 수집할 때마다 DB에서 센다. 복구 대기(`unfinished`)가 줄지 않으면 토스나 DB 장애가 이어지는 중이고, 사람 확인 필요(`review_required`, `reconciliation_open`)가 1 이상이면 관리자 화면에서 처리한다.
+
+### 외부 감시 (UptimeRobot)
+
+Prometheus는 같은 EC2 안에 있어서 서버가 통째로 멈추면 알리지 못한다. 그래서 바깥에서 따로 확인한다.
+
+1. UptimeRobot에서 New Monitor → HTTP(s), URL `https://<PUBLIC_HOST>/health`, 간격 5분
+2. 키워드 감시를 쓸 경우 `"status":"UP"`이 있는지 확인하게 한다. DB가 끊기면 `/health`가 503을 돌려준다.
+3. 알림 받을 메일을 등록한다. EC2 IP가 바뀌면 이 URL도 바꾼다.
 
 ## 백업에서 복구
 

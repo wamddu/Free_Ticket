@@ -1,0 +1,10 @@
+# Dashboards are files in the repository, so a fresh server shows the same panels.
+apiVersion: 1
+providers:
+  - name: free-ticket
+    folder: ""
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards

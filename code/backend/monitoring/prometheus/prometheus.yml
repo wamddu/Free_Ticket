@@ -1,0 +1,15 @@
+# Prometheus pulls the backend's metrics every 15s over the Docker network.
+# Port 8081 (management) is not published to the host, and Caddy does not proxy it.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: free-ticket-backend
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["backend:8081"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

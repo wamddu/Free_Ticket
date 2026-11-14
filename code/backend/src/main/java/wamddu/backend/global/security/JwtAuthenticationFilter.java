@@ -37,7 +37,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 path.equals("/api/auth/login")||
                 path.equals("/api/auth/refresh") ||
                 path.equals("/api/auth/logout") ||
-                path.startsWith("/api/events");
+                path.startsWith("/api/events") ||
+                // Health and metrics exist only on the management port (8081), which is not published outside Docker.
+                path.equals("/actuator/health") ||
+                path.equals("/actuator/prometheus");
     }
 
     @Override

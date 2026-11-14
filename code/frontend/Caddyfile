@@ -6,6 +6,17 @@
         reverse_proxy backend:8080
     }
 
+    # Backend health (UP/DOWN only) for the external uptime check. Metrics stay inside Docker.
+    handle /health {
+        rewrite * /actuator/health
+        reverse_proxy backend:8081
+    }
+
+    # Grafana is served under /grafana (GF_SERVER_SERVE_FROM_SUB_PATH).
+    handle /grafana* {
+        reverse_proxy grafana:3000
+    }
+
     handle {
         try_files {path} /index.html
         file_server

@@ -13,6 +13,8 @@ public interface PaymentReconciliationIssueRepository extends JpaRepository<Paym
         JpaSpecificationExecutor<PaymentReconciliationIssue> {
     boolean existsByMerchantIdAndTransactionKey(String merchantId, String transactionKey);
 
+    long countByResolvedAtUtcIsNull();
+
     interface Reference {
         String getOrderId();
         String getPgPaymentKey();

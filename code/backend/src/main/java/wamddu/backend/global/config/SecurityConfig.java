@@ -76,6 +76,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests((auth) -> auth
                         // Exceptions are re-dispatched to /error without the JWT; authorizing it would turn every error into 403.
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        // Served only on the management port (8081), which is not published outside Docker.
+                        .requestMatchers("/actuator/health", "/actuator/prometheus").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers(org.springframework.http.HttpMethod.GET,
                                 "/api/events/{eventId}/tickets/{ticketId}/price-history").permitAll()

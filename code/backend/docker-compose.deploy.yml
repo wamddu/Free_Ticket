@@ -16,6 +16,7 @@ services:
       - caddy_config:/config
     depends_on:
       - backend
+      - grafana
     restart: unless-stopped
 
   backend:
@@ -56,6 +57,45 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # Monitoring. Prometheus collects backend:8081 inside this network; nothing here is published to the host.
+  # Grafana is reached through Caddy at https://<PUBLIC_HOST>/grafana (anonymous visitors can only view).
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=1GB
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    mem_limit: 512m
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:12.0.0
+    environment:
+      # Used only when the grafana_data volume is first created; change it later in Grafana itself.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?required}
+      GF_SERVER_ROOT_URL: https://${PUBLIC_HOST:?required}/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/free-ticket.json
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    mem_limit: 256m
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
   mysql-db:
     image: mysql:8.0
     environment:
@@ -81,3 +121,5 @@ volumes:
   mysql_data:
   caddy_data:
   caddy_config:
+  prometheus_data:
+  grafana_data:

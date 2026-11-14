@@ -74,6 +74,11 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
             "ORDER BY O.nextRecoveryAt, O.id")
     List<Long> findRecoveryCandidates(@Param("now") LocalDateTime now, Pageable pageable);
 
+    // Monitoring: payments the recovery scheduler is still working on, and ones it handed to a person.
+    long countByStatusAndRecoveryReviewRequiredFalse(OrderStatus status);
+
+    long countByStatusInAndRecoveryReviewRequiredTrue(Collection<OrderStatus> statuses);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT O FROM Order O JOIN FETCH O.user WHERE O.id = :id")
     Optional<Order> findByIdForUpdate(@Param("id") Long id);
