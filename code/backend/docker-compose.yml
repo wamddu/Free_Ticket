@@ -11,11 +11,8 @@ services:
       # Local only: also load the demo events, tickets and accounts (db/seed). The server never sets this.
       SPRING_FLYWAY_LOCATIONS: classpath:db/migration,classpath:db/seed
       DEMO_ACCOUNT_EMAILS: user@example.com,admin@example.com
-      SPRING_JPA_SHOW_SQL: "false"
       EVENT_LIST_CACHE_ENABLED: "true"
       REDIS_HOST: redis
-      LOGGING_LEVEL_ORG_HIBERNATE_ORM_JDBC_BIND: INFO
-      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_WEB_SERVLET_DISPATCHERSERVLET: INFO
       TZ: Asia/Seoul
     depends_on:
       mysql-db:

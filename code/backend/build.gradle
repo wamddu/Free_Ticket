@@ -26,9 +26,8 @@ dependencies {
 	testImplementation 'org.springframework.security:spring-security-test'
 	compileOnly 'org.projectlombok:lombok'
 
-    //DB 연결 전에는 주석 처리
-    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 	runtimeOnly 'com.mysql:mysql-connector-j'
 	// 테이블 구조 변경은 src/main/resources/db/migration의 버전 파일로만 한다.
 	implementation 'org.springframework.boot:spring-boot-starter-flyway'
@@ -42,12 +41,12 @@ dependencies {
 	testRuntimeOnly 'com.h2database:h2'
 	testAnnotationProcessor 'org.projectlombok:lombok'
 
-    //jwt 라이브러리
-    implementation 'io.jsonwebtoken:jjwt-api:0.12.5'
-    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.5'
-    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.5'
+	// JWT 발급·검증
+	implementation 'io.jsonwebtoken:jjwt-api:0.12.5'
+	runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.12.5'
+	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.12.5'
 
-	//.env 파일 읽기 위한 라이브러리
+	// 로컬 실행 시 .env 파일 읽기
 	implementation 'io.github.cdimascio:dotenv-java:3.0.0'
 }
 

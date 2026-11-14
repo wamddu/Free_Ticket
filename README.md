@@ -13,6 +13,8 @@
 
 체험 계정은 누구나 쓰는 공개 계정이라 비밀번호 변경·탈퇴와 관리자 데이터 수정이 막혀 있다. 결제는 토스 테스트 모드라 실제로 돈이 나가지 않는다.
 
+화면: [메인](docs/images/screen-home.jpg) · [공연 상세](docs/images/screen-ticket.jpg) · [랭킹](docs/images/screen-ranking.jpg) · [관리자 결제 처리](docs/images/admin-reconciliation-full-cancel.png) · [관리자 주문 조회](docs/images/admin-orders-read-only.png)
+
 ## 프로젝트 정보
 
 - **기간:** 2026.05 ~ (4인 팀)
