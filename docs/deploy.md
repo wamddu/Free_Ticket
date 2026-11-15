@@ -47,9 +47,111 @@ Ubuntu 24.04, 메모리 4GB, 디스크 30GB 기준이다.
 
 4. `https://<PUBLIC_HOST>`에서 회원가입, 로그인, 공연 목록, 테스트 결제를 확인한다. 네이버 지도 콘솔의 웹 서비스 URL에도 이 주소를 등록한다.
 
-## 재배포
+## 자동 배포 (CD)
 
-아래 명령은 모두 `~/Free_Ticket/code/backend`에서 실행한다.
+main에 푸시하면 CI가 끝난 뒤 `Deploy` 워크플로([deploy.yml](../.github/workflows/deploy.yml))가 이어서 실행된다.
+
+```
+main 푸시 → CI(테스트) 통과
+  → Deploy: 커밋마다 backend·web 이미지를 빌드해 GHCR에 올림 (ghcr.io/wamddu/free-ticket-*:<커밋>)
+  → AWS SSM Run Command로 서버에서 code/backend/deploy.sh <커밋> 실행
+       ├ 서버에서 직접 고친 파일이 있으면 중단
+       ├ DB 백업 (~/backups, 최근 10개 보관)
+       ├ 해당 커밋으로 이동, 이미지 받아서 교체
+       ├ /health가 UP이 될 때까지 최대 4분 대기
+       └ 실패하면 이전 커밋과 이전 이미지로 되돌림
+```
+
+- 서버의 SSH 포트를 GitHub에 열지 않는다. GitHub Actions는 OIDC 토큰으로 AWS 임시 권한을 받아 SSM에 명령만 보낸다. 저장소에 AWS 키를 두지 않는다.
+- 테스트는 CI에서 한 번만 실행한다(이미지 빌드 때는 `RUN_TESTS=false`).
+- 수동 재배포가 필요하면 Actions 탭 → Deploy → Run workflow로 main의 최신 커밋을 다시 배포한다.
+- 되돌린 경우 실패한 버전이 마이그레이션을 실행했을 수 있다. 로그에 나온 백업 파일로 복구할지 확인한다.
+
+### 처음 한 번 설정
+
+리전은 서울(`ap-northeast-2`) 기준이다. `<계정ID>`(12자리)와 `<인스턴스ID>`(`i-`로 시작)는 콘솔 오른쪽 위 계정 메뉴와 EC2 인스턴스 목록에서 확인한다.
+
+**1. EC2가 SSM 명령을 받을 수 있게 하기**
+
+1. IAM → 역할 → 역할 생성 → 신뢰할 수 있는 엔터티 "AWS 서비스", 사용 사례 "EC2" → 권한 `AmazonSSMManagedInstanceCore` 선택 → 이름 `free-ticket-ec2-ssm` → 생성
+2. EC2 → 인스턴스 선택 → 작업 → 보안 → IAM 역할 수정 → `free-ticket-ec2-ssm` → 업데이트
+3. 서버에서 에이전트를 다시 시작한다(Ubuntu AMI에 기본 설치돼 있다).
+   ```sh
+   sudo snap restart amazon-ssm-agent
+   ```
+4. Systems Manager → 노드 관리 → Fleet Manager에 인스턴스가 "온라인"으로 보이면 된다(1~5분).
+
+**2. GitHub를 AWS에 신원 공급자로 등록**
+
+IAM → 자격 증명 공급자 → 공급자 추가 → OpenID Connect
+- 공급자 URL: `https://token.actions.githubusercontent.com`
+- 대상: `sts.amazonaws.com`
+
+**3. GitHub Actions가 쓸 배포 역할**
+
+IAM → 역할 → 역할 생성 → "사용자 지정 신뢰 정책"에 아래를 넣는다. 이 저장소의 main 브랜치에서 실행된 워크플로만 이 역할을 쓸 수 있다.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {"Federated": "arn:aws:iam::<계정ID>:oidc-provider/token.actions.githubusercontent.com"},
+    "Action": "sts:AssumeRoleWithWebIdentity",
+    "Condition": {
+      "StringEquals": {
+        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+        "token.actions.githubusercontent.com:sub": "repo:wamddu/Free_Ticket:ref:refs/heads/main"
+      }
+    }
+  }]
+}
+```
+
+권한 단계는 건너뛰고 이름 `free-ticket-github-deploy`로 생성한다. 만든 역할 → 권한 추가 → 인라인 정책 생성 → JSON에 아래를 넣고 이름 `ssm-deploy`로 저장한다. 이 서버 한 대에 셸 명령을 보내고 결과를 읽는 권한만 준다.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "ssm:SendCommand",
+      "Resource": [
+        "arn:aws:ec2:ap-northeast-2:<계정ID>:instance/<인스턴스ID>",
+        "arn:aws:ssm:ap-northeast-2::document/AWS-RunShellScript"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["ssm:GetCommandInvocation", "ssm:ListCommandInvocations"],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+**4. GitHub 저장소 변수**
+
+저장소 → Settings → Secrets and variables → Actions → **Variables** 탭 → New repository variable. 비밀 값이 아니므로 Secrets가 아니라 Variables에 넣는다.
+
+| 이름 | 값 |
+|---|---|
+| `AWS_REGION` | `ap-northeast-2` |
+| `AWS_DEPLOY_ROLE_ARN` | 3에서 만든 역할의 ARN (`arn:aws:iam::<계정ID>:role/free-ticket-github-deploy`) |
+| `EC2_INSTANCE_ID` | `<인스턴스ID>` |
+| `VITE_TOSS_CLIENT_KEY` | `.env.deploy`의 같은 이름 값 (브라우저에 그대로 노출되는 테스트 클라이언트 키) |
+| `VITE_NAVER_MAP_CLIENT_ID` | `.env.deploy`의 같은 이름 값 |
+
+**5. 첫 실행 후 이미지 공개**
+
+첫 Deploy 실행에서 이미지가 GHCR에 올라간 뒤, GitHub 프로필 → Packages → `free-ticket-backend`와 `free-ticket-web` 각각 → Package settings → Change visibility → Public. 이미지에는 비밀 값이 없다(서버의 `.env.deploy`에서 실행 시 주입). 공개 전에는 서버가 이미지를 받지 못해 첫 배포가 실패한다(서버는 아무것도 바뀌지 않는다). 공개한 뒤 Actions에서 실패한 Deploy 실행을 Re-run 한다.
+
+1~4를 마치기 전에는 Deploy 워크플로가 실패하지 않고 건너뛴다.
+
+## 수동 재배포
+
+자동 배포를 쓸 수 없을 때의 절차다. 아래 명령은 모두 `~/Free_Ticket/code/backend`에서 실행한다.
 
 1. DB를 백업한다.
 

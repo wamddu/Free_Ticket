@@ -21,7 +21,7 @@
 
 - **기간:** 2026.05 ~ (4인 팀)
 - **담당:** 백엔드 전반
-- **2026.11 개선:** 장애 대응 보강, CI 구축, Flyway 도입, 체험 계정 보호, 모니터링, 문서화 ([개선 내역](#개선-내역-202611))
+- **2026.11 개선:** 장애 대응 보강, CI/CD 구축, Flyway 도입, 체험 계정 보호, 모니터링, 문서화 ([개선 내역](#개선-내역-202611))
 
 ## 기술 스택
 
@@ -31,7 +31,7 @@
 | DB · 캐시 | MySQL 8.0, Flyway, Redis |
 | 외부 연동 | 토스페이먼츠(결제·취소·거래 조회), 네이버 SMTP(메일 인증), Gemini(AI 공연 검색), 네이버 지도 |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS, Vitest |
-| 인프라 | AWS EC2, Docker Compose, Caddy(HTTPS·리버스 프록시), GitHub Actions |
+| 인프라 | AWS EC2, Docker Compose, Caddy(HTTPS·리버스 프록시), GitHub Actions(CI/CD), GHCR, AWS SSM |
 | 모니터링 | Spring Boot Actuator, Micrometer, Prometheus, Grafana, UptimeRobot(외부 감시) |
 
 ## 구성
@@ -131,10 +131,11 @@ stateDiagram-v2
 - **외부 감시:** Prometheus는 같은 서버에 있어 서버 전체가 멈추면 알리지 못한다. 그래서 UptimeRobot이 바깥에서 5분마다 `/health`를 확인하고 메일로 알린다.
 - 대시보드와 수집 설정은 파일([monitoring](code/backend/monitoring))로 관리해 서버를 새로 띄워도 같은 화면이 나온다.
 
-## 테스트와 CI
+## 테스트와 CI/CD
 
 - 백엔드 테스트 369개. H2 단위·통합 테스트에 더해 **MySQL 8.0 컨테이너에서** 동시성 테스트와 마이그레이션 검증을 실행한다.
 - GitHub Actions가 main 푸시와 PR마다 백엔드 테스트와 프론트 린트·테스트·빌드를 실행한다.
+- **CD:** main에서 CI가 통과하면 이미지를 GHCR에 올리고, AWS SSM으로 서버에 배포한다. 배포 전 DB를 백업하고, `/health`가 UP이 되지 않으면 이전 버전으로 되돌린다. SSH 포트를 열거나 AWS 키를 저장하지 않고 OIDC 임시 권한을 쓴다([배포 문서](docs/deploy.md#자동-배포-cd)).
 - `FlywayMigrationTest`가 빈 MySQL에 모든 마이그레이션을 적용한 뒤, 엔티티와 테이블이 일치하는지 검사한다.
 
 ## 개선 내역 (2026.11)
@@ -171,6 +172,6 @@ npm run dev                 # http://localhost:5173
 ## 문서
 
 - [데이터베이스 설계](docs/database.md): ERD, 제약 조건, 동시성, 스키마 변경 방법
-- [배포](docs/deploy.md): EC2 배포·재배포·복구·모니터링
+- [배포](docs/deploy.md): EC2 배포, 자동 배포(CD) 설정, 복구, 모니터링
 - 장애 대응: [결제 복구 설계](docs/reports/2026-09-19-payment-recovery.md), [복구 스케줄러](docs/reports/2026-09-20-payment-recovery-scheduler.md), [마지막 티켓 동시 주문](docs/reports/2026-09-25-last-ticket-concurrency.md), [결제 대사 실연동 검증](docs/reports/2026-09-28-payment-reconciliation-toss-test.md), [관리자 결제 처리](docs/reports/2026-09-29-admin-payment-operations.md)
 - 성능: [예매 내역 N+1](docs/reports/2026-09-15-reservation-list-n-plus-1.md), [HOT API](docs/reports/2026-09-24-hot-api-performance.md), [화면 단위 측정](docs/reports/2026-09-25-page-api-performance.md), [10월 종합 측정](docs/reports/2026-10-31-local-performance-baseline.md), [주문 인덱스](docs/reports/2026-10-31-orders-ticket-index.md), [인증 인덱스](docs/reports/2026-10-31-auth-indexes.md), [로그인 병목](docs/reports/2026-11-01-login-bottleneck.md), [토큰 정리 분리](docs/reports/2026-11-01-token-cleanup.md), [목록 페이지 나누기](docs/reports/2026-11-01-event-list-pagination.md), [Redis 목록 캐시](docs/reports/2026-11-01-redis-list-cache.md), [화면 단위 재측정](docs/reports/2026-11-14-page-api-remeasure.md)

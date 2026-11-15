@@ -1,0 +1,127 @@
+name: Deploy
+
+# Runs after CI passes on main (or by hand from the Actions tab).
+# 1. builds the backend and web images for that commit and pushes them to GHCR
+# 2. asks the EC2 server, through AWS SSM Run Command, to run code/backend/deploy.sh <commit>
+#    No SSH port is opened and no AWS key is stored: GitHub's OIDC token is exchanged for a short-lived role.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+  REGISTRY: ghcr.io/wamddu
+
+jobs:
+  images:
+    name: Build images
+    # Skipped (not failed) until the AWS variables in docs/deploy.md are set.
+    if: >-
+      vars.AWS_DEPLOY_ROLE_ARN != '' && (github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.SHA }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: code/backend
+          build-args: RUN_TESTS=false
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/free-ticket-backend:${{ env.SHA }}
+            ${{ env.REGISTRY }}/free-ticket-backend:latest
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+
+      - name: Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: code/frontend
+          file: code/frontend/Dockerfile.deploy
+          # Both values end up in the browser bundle, so they are repository variables, not secrets.
+          build-args: |
+            VITE_TOSS_CLIENT_KEY=${{ vars.VITE_TOSS_CLIENT_KEY }}
+            VITE_NAVER_MAP_CLIENT_ID=${{ vars.VITE_NAVER_MAP_CLIENT_ID }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/free-ticket-web:${{ env.SHA }}
+            ${{ env.REGISTRY }}/free-ticket-web:latest
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+  deploy:
+    name: Deploy to EC2
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Run deploy.sh on the server
+        env:
+          INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+        run: |
+          repo=/home/ubuntu/Free_Ticket
+          cat > params.json <<EOF
+          {"commands": [
+            "set -e",
+            "sudo -u ubuntu git -C $repo fetch --quiet origin",
+            "sudo -u ubuntu git -C $repo show $SHA:code/backend/deploy.sh > /tmp/free-ticket-deploy.sh",
+            "bash /tmp/free-ticket-deploy.sh $SHA"
+          ], "executionTimeout": ["900"]}
+          EOF
+          command_id=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "free-ticket ${SHA:0:7}" \
+            --parameters file://params.json \
+            --query Command.CommandId --output text)
+          echo "SSM command $command_id"
+
+          status=Pending
+          for _ in $(seq 1 100); do
+            sleep 10
+            status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+              --query Status --output text 2>/dev/null || echo Pending)
+            case "$status" in Pending|InProgress|Delayed) continue ;; *) break ;; esac
+          done
+
+          aws ssm get-command-invocation --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+            --query StandardOutputContent --output text
+          echo "--- stderr ---"
+          aws ssm get-command-invocation --command-id "$command_id" --instance-id "$INSTANCE_ID" \
+            --query StandardErrorContent --output text
+          echo "status: $status"
+          [ "$status" = "Success" ]

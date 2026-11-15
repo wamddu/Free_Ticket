@@ -1,5 +1,8 @@
+# Images: GitHub Actions builds them for each commit on main and deploy.sh pulls them by IMAGE_TAG (the commit SHA).
+# Manual fallback without GHCR: `up -d --build` builds both on the server as before.
 services:
   web:
+    image: ghcr.io/wamddu/free-ticket-web:${IMAGE_TAG:-latest}
     build:
       context: ../frontend
       dockerfile: Dockerfile.deploy
@@ -20,6 +23,7 @@ services:
     restart: unless-stopped
 
   backend:
+    image: ghcr.io/wamddu/free-ticket-backend:${IMAGE_TAG:-latest}
     build: .
     environment:
       SERVER_FORWARD_HEADERS_STRATEGY: framework
