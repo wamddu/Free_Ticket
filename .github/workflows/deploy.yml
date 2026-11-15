@@ -2,7 +2,7 @@ name: Deploy
 
 # Runs after CI passes on main (or by hand from the Actions tab).
 # 1. builds the backend and web images for that commit and pushes them to GHCR
-# 2. asks the EC2 server, through AWS SSM Run Command, to run code/backend/deploy.sh <commit>
+# 2. asks the server (a Lightsail instance registered with SSM as a hybrid node), through AWS SSM Run Command, to run code/backend/deploy.sh <commit>
 #    No SSH port is opened and no AWS key is stored: GitHub's OIDC token is exchanged for a short-lived role.
 on:
   workflow_run:
@@ -76,7 +76,7 @@ jobs:
           cache-to: type=gha,scope=web,mode=max
 
   deploy:
-    name: Deploy to EC2
+    name: Deploy to server
     needs: images
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -91,7 +91,8 @@ jobs:
 
       - name: Run deploy.sh on the server
         env:
-          INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+          # The SSM node ID (mi-...). EC2_INSTANCE_ID is the variable's earlier name.
+          INSTANCE_ID: ${{ vars.SSM_NODE_ID || vars.EC2_INSTANCE_ID }}
         run: |
           repo=/home/ubuntu/Free_Ticket
           cat > params.json <<EOF

@@ -1,6 +1,6 @@
-# 배포 (EC2 + Docker Compose)
+# 배포 (AWS Lightsail + Docker Compose)
 
-토스 테스트 키와 테스트 데이터로 운영하는 시연용 배포 절차다.
+토스 테스트 키와 테스트 데이터로 운영하는 시연용 배포 절차다. 서버는 AWS Lightsail 인스턴스(Ubuntu 24.04) 한 대다.
 
 ## 구성
 
@@ -14,10 +14,12 @@
 ```
 
 - 설정 파일: `code/backend/docker-compose.deploy.yml`, 비밀 값: 같은 폴더의 `.env.deploy`(Git에 올리지 않음)
-- 보안 그룹은 SSH(내 IP), HTTP(80), HTTPS(443)만 연다. MySQL은 `127.0.0.1:3306`으로 서버 내부에만 열려 있다.
-- 백엔드 이미지 빌드 중에 테스트가 실행된다. 테스트가 실패하면 기존 컨테이너가 그대로 서비스를 계속한다.
+- Lightsail 방화벽(인스턴스 → 네트워킹 → IPv4 방화벽)은 SSH(22), HTTP(80), HTTPS(443)만 연다. SSH는 내 IP로 제한한다. MySQL은 `127.0.0.1:3306`으로 서버 내부에만 열려 있다.
+- 평소 배포는 [자동 배포](#자동-배포-cd)가 한다. 서버에서 직접 빌드할 때(`up -d --build`)는 이미지 빌드 중에 테스트가 실행되고, 실패하면 기존 컨테이너가 그대로 서비스를 계속한다.
 
 ## 처음 배포
+
+**서버를 새로 만들 때만 쓰는 절차다.** 운영 중인 서버에서 다시 실행하면 비밀 값을 예시 값으로 덮어쓸 수 있다. 업데이트는 [자동 배포](#자동-배포-cd)나 [수동 재배포](#수동-재배포)를 쓴다.
 
 Ubuntu 24.04, 메모리 4GB, 디스크 30GB 기준이다.
 
@@ -26,13 +28,14 @@ Ubuntu 24.04, 메모리 4GB, 디스크 30GB 기준이다.
    ```sh
    git clone https://github.com/wamddu/Free_Ticket.git
    cd Free_Ticket/code/backend
-   cp .env.deploy.example .env.deploy
+   # -n: 이미 .env.deploy가 있으면 덮어쓰지 않는다.
+   cp -n .env.deploy.example .env.deploy
    chmod 600 .env.deploy
    nano .env.deploy
    ```
 
 2. `.env.deploy`를 채운다.
-   - `PUBLIC_HOST`: EC2 IP가 `203.0.113.10`이면 `203-0-113-10.sslip.io`
+   - `PUBLIC_HOST`: 서버 공인 IP가 `203.0.113.10`이면 `203-0-113-10.sslip.io`
    - DB 비밀번호 두 개는 서로 다르게, `JWT_SECRET`은 `openssl rand -hex 32` 값
    - 토스 테스트 키, 네이버 지도 클라이언트 ID, 메일 발송용 네이버 계정과 앱 비밀번호
    - `DEMO_ACCOUNT_EMAILS`: README에 공개한 체험 계정 이메일. 비우면 체험 계정 보호가 꺼진다.
@@ -63,23 +66,33 @@ main 푸시 → CI(테스트) 통과
 ```
 
 - 서버의 SSH 포트를 GitHub에 열지 않는다. GitHub Actions는 OIDC 토큰으로 AWS 임시 권한을 받아 SSM에 명령만 보낸다. 저장소에 AWS 키를 두지 않는다.
+- 서버의 SSM 에이전트가 AWS에 먼저 연결해 명령을 받아 가는 방식이라, 서버로 들어오는 포트가 필요 없다.
 - 테스트는 CI에서 한 번만 실행한다(이미지 빌드 때는 `RUN_TESTS=false`).
 - 수동 재배포가 필요하면 Actions 탭 → Deploy → Run workflow로 main의 최신 커밋을 다시 배포한다.
 - 되돌린 경우 실패한 버전이 마이그레이션을 실행했을 수 있다. 로그에 나온 백업 파일로 복구할지 확인한다.
 
 ### 처음 한 번 설정
 
-리전은 서울(`ap-northeast-2`) 기준이다. `<계정ID>`(12자리)와 `<인스턴스ID>`(`i-`로 시작)는 콘솔 오른쪽 위 계정 메뉴와 EC2 인스턴스 목록에서 확인한다.
+리전은 서울(`ap-northeast-2`) 기준이다. `<계정ID>`(12자리)는 콘솔 오른쪽 위 계정 메뉴에서 확인한다. 서버 안에서 보이는 계정 번호(인스턴스 역할 ARN의 번호)는 Lightsail이 쓰는 계정이라 다르다.
 
-**1. EC2가 SSM 명령을 받을 수 있게 하기**
+**1. 서버를 SSM 관리 노드로 등록 (하이브리드 활성화)**
 
-1. IAM → 역할 → 역할 생성 → 신뢰할 수 있는 엔터티 "AWS 서비스", 사용 사례 "EC2" → 권한 `AmazonSSMManagedInstanceCore` 선택 → 이름 `free-ticket-ec2-ssm` → 생성
-2. EC2 → 인스턴스 선택 → 작업 → 보안 → IAM 역할 수정 → `free-ticket-ec2-ssm` → 업데이트
-3. 서버에서 에이전트를 다시 시작한다(Ubuntu AMI에 기본 설치돼 있다).
+Lightsail 인스턴스는 EC2와 달리 IAM 역할을 직접 붙일 수 없다. 그래서 AWS 밖의 서버와 같은 방식(하이브리드 활성화)으로 SSM에 등록한다. 서버 1대는 무료 범위(기본 티어)다.
+
+1. Systems Manager → 하이브리드 활성화 → 활성화 생성
+   - 인스턴스 제한 `1`, IAM 역할은 "시스템에서 생성한 기본 역할 사용"
+   - 생성 직후 한 번만 보이는 **Activation Code**와 **Activation ID**를 따로 적어 둔다. 남에게 공유하지 않는다.
+2. 서버에서 등록한다. Ubuntu에는 에이전트가 snap으로 설치돼 있다.
    ```sh
-   sudo snap restart amazon-ssm-agent
+   sudo snap stop amazon-ssm-agent
+   sudo /snap/amazon-ssm-agent/current/amazon-ssm-agent -register -code "<Activation Code>" -id "<Activation ID>" -region "ap-northeast-2" -y
+   sudo snap start amazon-ssm-agent
    ```
-4. Systems Manager → 노드 관리 → Fleet Manager에 인스턴스가 "온라인"으로 보이면 된다(1~5분).
+3. 등록된 노드 ID(`mi-`로 시작)를 확인한다.
+   ```sh
+   sudo cat /var/lib/amazon/ssm/registration
+   ```
+4. Systems Manager → Fleet Manager에 그 노드가 "온라인"으로 보이면 된다(1~2분). 안 보이면 `sudo snap restart amazon-ssm-agent` 후 `/var/log/amazon/ssm/amazon-ssm-agent.log`를 확인한다.
 
 **2. GitHub를 AWS에 신원 공급자로 등록**
 
@@ -101,14 +114,16 @@ IAM → 역할 → 역할 생성 → "사용자 지정 신뢰 정책"에 아래�
     "Condition": {
       "StringEquals": {
         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-        "token.actions.githubusercontent.com:sub": "repo:wamddu/Free_Ticket:ref:refs/heads/main"
+        "token.actions.githubusercontent.com:sub": "repo:wamddu@169367562/Free_Ticket@1452830219:ref:refs/heads/main"
       }
     }
   }]
 }
 ```
 
-권한 단계는 건너뛰고 이름 `free-ticket-github-deploy`로 생성한다. 만든 역할 → 권한 추가 → 인라인 정책 생성 → JSON에 아래를 넣고 이름 `ssm-deploy`로 저장한다. 이 서버 한 대에 셸 명령을 보내고 결과를 읽는 권한만 준다.
+`sub`의 `@숫자`는 GitHub 소유자와 저장소의 고유 ID다. GitHub가 이 형식으로 토큰을 보내는 저장소에서 `repo:wamddu/Free_Ticket:...`처럼 이름만 쓰면 `Not authorized to perform sts:AssumeRoleWithWebIdentity`로 거절된다. ID가 들어 있어서 같은 이름으로 저장소를 다시 만들어도 이 역할을 쓸 수 없다. 저장소를 옮겼거나 거절될 때는 CloudTrail → 이벤트 기록 → 이벤트 이름 `AssumeRoleWithWebIdentity`의 `userIdentity.userName`에서 실제 값을 확인해 그대로 넣는다.
+
+권한 단계는 건너뛰고 이름 `free-ticket-github-deploy`로 생성한다. 만든 역할 → 권한 추가 → 인라인 정책 생성 → JSON에 아래를 넣고 이름 `ssm-deploy`로 저장한다. 이 노드 한 대에 셸 명령을 보내고 결과를 읽는 권한만 준다.
 
 ```json
 {
@@ -118,7 +133,7 @@ IAM → 역할 → 역할 생성 → "사용자 지정 신뢰 정책"에 아래�
       "Effect": "Allow",
       "Action": "ssm:SendCommand",
       "Resource": [
-        "arn:aws:ec2:ap-northeast-2:<계정ID>:instance/<인스턴스ID>",
+        "arn:aws:ssm:ap-northeast-2:<계정ID>:managed-instance/<mi-노드ID>",
         "arn:aws:ssm:ap-northeast-2::document/AWS-RunShellScript"
       ]
     },
@@ -139,7 +154,7 @@ IAM → 역할 → 역할 생성 → "사용자 지정 신뢰 정책"에 아래�
 |---|---|
 | `AWS_REGION` | `ap-northeast-2` |
 | `AWS_DEPLOY_ROLE_ARN` | 3에서 만든 역할의 ARN (`arn:aws:iam::<계정ID>:role/free-ticket-github-deploy`) |
-| `EC2_INSTANCE_ID` | `<인스턴스ID>` |
+| `SSM_NODE_ID` | 1에서 확인한 `mi-` 노드 ID (예전 이름 `EC2_INSTANCE_ID`도 읽는다) |
 | `VITE_TOSS_CLIENT_KEY` | `.env.deploy`의 같은 이름 값 (브라우저에 그대로 노출되는 테스트 클라이언트 키) |
 | `VITE_NAVER_MAP_CLIENT_ID` | `.env.deploy`의 같은 이름 값 |
 
@@ -148,6 +163,15 @@ IAM → 역할 → 역할 생성 → "사용자 지정 신뢰 정책"에 아래�
 첫 Deploy 실행에서 이미지가 GHCR에 올라간 뒤, GitHub 프로필 → Packages → `free-ticket-backend`와 `free-ticket-web` 각각 → Package settings → Change visibility → Public. 이미지에는 비밀 값이 없다(서버의 `.env.deploy`에서 실행 시 주입). 공개 전에는 서버가 이미지를 받지 못해 첫 배포가 실패한다(서버는 아무것도 바뀌지 않는다). 공개한 뒤 Actions에서 실패한 Deploy 실행을 Re-run 한다.
 
 1~4를 마치기 전에는 Deploy 워크플로가 실패하지 않고 건너뛴다.
+
+### 설정하며 겪은 문제
+
+| 증상 | 원인 | 해결 |
+|---|---|---|
+| Fleet Manager에 서버가 안 보임 | Lightsail 인스턴스에는 `AmazonLightsailInstanceRole`이 붙어 있고 바꿀 수 없다. 에이전트 로그에 `not authorized to perform: ssm:UpdateInstanceInformation` | 하이브리드 활성화로 등록(위 1) |
+| `Not authorized to perform sts:AssumeRoleWithWebIdentity` | 토큰의 `sub`가 `repo:wamddu@<ID>/Free_Ticket@<ID>:...` 형식이었다 | CloudTrail에서 실제 `sub`를 확인해 신뢰 정책에 반영(위 3) |
+| `not authorized to perform: ssm:SendCommand on resource: ...managed-instance/mi-...` | 정책 Resource가 EC2 형식(`instance/i-...`)이었다 | `managed-instance/<mi-노드ID>`로 변경 |
+| 서버가 이미지를 받지 못함 | GHCR 패키지가 비공개 | 패키지를 Public으로 변경(위 5) |
 
 ## 수동 재배포
 
@@ -193,13 +217,15 @@ IAM → 역할 → 역할 생성 → "사용자 지정 신뢰 정책"에 아래�
 
 ### 외부 감시 (UptimeRobot)
 
-Prometheus는 같은 EC2 안에 있어서 서버가 통째로 멈추면 알리지 못한다. 그래서 바깥에서 따로 확인한다.
+Prometheus는 같은 서버 안에 있어서 서버가 통째로 멈추면 알리지 못한다. 그래서 바깥에서 따로 확인한다.
 
 1. UptimeRobot에서 New Monitor → HTTP(s), URL `https://<PUBLIC_HOST>/health`, 간격 5분
 2. 키워드 감시를 쓸 경우 `"status":"UP"`이 있는지 확인하게 한다. DB가 끊기면 `/health`가 503을 돌려준다.
-3. 알림 받을 메일을 등록한다. EC2 IP가 바뀌면 이 URL도 바꾼다.
+3. 알림 받을 메일을 등록한다. 서버 IP가 바뀌면 이 URL도 바꾼다.
 
 ## 백업에서 복구
+
+자동 배포는 매번 `~/backups/free_ticket-<시각>-<커밋>.sql`에 백업을 남긴다(최근 10개).
 
 ```sh
 sudo docker compose --env-file .env.deploy -f docker-compose.deploy.yml exec -T mysql-db sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -u root free_ticket' < ~/free_ticket-backup-YYYYMMDD-HHMM.sql
@@ -209,11 +235,11 @@ sudo docker compose --env-file .env.deploy -f docker-compose.deploy.yml exec -T 
 
 MySQL 포트는 외부에 열지 않는다. MySQL Workbench나 DBeaver에서 SSH 터널(Workbench의 "Standard TCP/IP over SSH")로 접속한다.
 
-- SSH: EC2 주소, 사용자 `ubuntu`, 키 페어 파일
+- SSH: 서버 공인 IP, 사용자 `ubuntu`, Lightsail SSH 키 파일
 - MySQL: `127.0.0.1:3306`, `.env.deploy`의 `DB_USERNAME`/`DB_PASSWORD`
 
 ## 주의
 
-- EC2를 중지했다가 시작하면 자동 할당 퍼블릭 IP가 바뀐다. `.env.deploy`의 `PUBLIC_HOST`를 바꾸고 `up -d --build`를 다시 실행한다. 고정 주소가 필요하면 Elastic IP를 쓰되, 중지 중에도 요금이 든다.
+- 고정 IP(Static IP)를 붙이지 않은 Lightsail 인스턴스는 중지했다가 시작하면 공인 IP가 바뀐다. 바뀌면 `.env.deploy`의 `PUBLIC_HOST`, 네이버 지도 콘솔의 웹 서비스 URL, UptimeRobot 주소를 함께 바꾸고 `up -d --build`를 다시 실행한다. Lightsail 네트워킹 탭에서 고정 IP를 만들어 붙이면 바뀌지 않는다(인스턴스에 붙지 않은 고정 IP는 요금이 나올 수 있다).
 - `docker compose down -v`는 DB 볼륨을 지운다. 사용하지 않는다.
-- EC2를 종료하기 전에는 DB를 백업한다.
+- 인스턴스를 삭제하기 전에는 DB를 백업한다.

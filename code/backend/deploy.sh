@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs on the EC2 server (as root, sent by GitHub Actions through AWS SSM Run Command).
+# Runs on the server (as root, sent by GitHub Actions through AWS SSM Run Command).
 #   deploy.sh <commit-sha>
 # 1. stops if someone edited files on the server
 # 2. backs up the database
