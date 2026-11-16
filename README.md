@@ -147,6 +147,7 @@ stateDiagram-v2
 - **비밀번호 정책:** 비밀번호 변경 API에 검증이 없어 1자 비밀번호로도 바꿀 수 있었고, 가입 때 72바이트를 넘으면 BCrypt 예외가 났다. 규칙을 한 곳으로 모아 가입·변경·재설정에 같이 적용했다.
 - **주간 랭킹:** 누적 판매량으로 집계하던 것을 최근 7일 결제 수량 기준으로 바꿨다. 최근 판매가 없으면 누적 순위로 대신 보여 주고, 화면에 그 사실을 표시한다.
 - **CI 구축**과 **Flyway 도입:** 운영 DB는 구조 비교 → baseline으로 데이터 변경 없이 전환했다.
+- **자동 배포(CD):** main에 푸시하면 테스트 통과 → 이미지 빌드 → DB 백업 → 배포 → `/health` 확인까지 진행하고, 실패하면 이전 버전으로 되돌린다.
 - **공개 체험 계정 보호**와 **로컬 데모 데이터:** 데모 데이터는 실행일 기준 날짜로 만든다.
 - **모니터링:** Prometheus·Grafana로 API, 서버 자원, 결제 복구 상태를 보고, UptimeRobot으로 바깥에서 서버가 살아 있는지 확인한다.
 
@@ -155,7 +156,7 @@ stateDiagram-v2
 필요: Docker, JDK 21, Node.js 22
 
 ```sh
-# 1) 백엔드 + MySQL + Redis (데모 공연과 체험 계정이 함께 생성됨)
+# 1) 백엔드 + MySQL + Redis + Prometheus·Grafana (데모 공연과 체험 계정이 함께 생성됨)
 cd code/backend
 cp .env.example .env        # JWT_SECRET에 openssl rand -hex 32 값, 토스 테스트 시크릿 키 입력
 docker compose up -d --build
@@ -166,6 +167,8 @@ cp .env.example .env        # 토스 테스트 클라이언트 키, 네이버 �
 npm ci
 npm run dev                 # http://localhost:5173
 ```
+
+로컬 Grafana는 http://localhost:3000 (로그인 없이 보기, 관리자 `admin`/`admin`), Prometheus는 http://localhost:9090 이다.
 
 테스트: `cd code/backend && ./gradlew test` (MySQL 테스트는 `RUN_MYSQL_CONCURRENCY=true`와 3308 포트 MySQL이 필요하며, CI 설정 [ci.yml](.github/workflows/ci.yml)과 같다)
 
