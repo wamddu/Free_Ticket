@@ -44,4 +44,8 @@ public class Event {
     private Integer running_time;
 
     private String descriptionImageUrl;
+
+    // 켜면 주문 전에 대기열 입장권이 필요하다(docs/design/waiting-queue.md).
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean queueEnabled;
 }

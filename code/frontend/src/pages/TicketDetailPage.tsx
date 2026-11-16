@@ -112,6 +112,11 @@ export default function TicketDetailPage() {
       return;
     }
 
+    if (event?.queueEnabled) {
+      navigate(`/queue/${eventId}?ticketId=${selectedTicket.ticketId}&quantity=${quantity}`);
+      return;
+    }
+
     setOrdering(true);
     setOrderError(null);
     try {
@@ -276,6 +281,11 @@ export default function TicketDetailPage() {
                     {ordering ? "주문 생성 중..." : "예매하기"}
                   </button>
                 </div>
+              )}
+              {event?.queueEnabled && (
+                <p className="mt-4 text-right text-sm text-gray-500">
+                  예매가 몰리는 공연이라 대기열 순서대로 예매합니다.
+                </p>
               )}
               {orderError && (
                 <p className="mt-4 text-right text-sm font-bold text-red-500">{orderError}</p>

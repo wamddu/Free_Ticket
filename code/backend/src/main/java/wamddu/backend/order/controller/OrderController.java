@@ -11,12 +11,14 @@ import wamddu.backend.order.dto.request.CreateOrderRequest;
 import wamddu.backend.order.dto.response.CheckoutOrderResponse;
 import wamddu.backend.order.dto.response.ReservationListResponse;
 import wamddu.backend.order.service.OrderService;
+import wamddu.backend.queue.QueueGate;
 
 @RestController
 @RequestMapping("/api/orders")
 @RequiredArgsConstructor
 public class OrderController {
     private final OrderService orderService;
+    private final QueueGate queueGate;
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -24,6 +26,8 @@ public class OrderController {
             @Valid @RequestBody CreateOrderRequest request,
             @AuthenticationPrincipal UserDetails principal
     ) {
+        // Outside the order transaction on purpose; see QueueGate.
+        queueGate.requirePass(request.getTicketId(), userId(principal));
         return ApiResponse.success("주문이 생성되었습니다.", orderService.createOrder(request, userId(principal)));
     }
 

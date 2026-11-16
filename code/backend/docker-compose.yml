@@ -51,7 +51,9 @@ services:
 
   redis:
     image: redis:7.4-alpine
-    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    # volatile-lru: under memory pressure evict only keys with a TTL (list cache, queue passes). The waiting line
+    # and its sequence number have no TTL, so a full cache can never drop users from the queue or reorder it.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "volatile-lru"]
     ports:
       - "127.0.0.1:6379:6379"
     healthcheck:

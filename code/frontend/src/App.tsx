@@ -7,6 +7,7 @@ import Homepage from './pages/Homepage';
 import SearchPage from './pages/SearchPage';
 import Loginpage from './pages/Loginpage';
 import TicketDetailPage from './pages/TicketDetailPage';
+import QueuePage from './pages/QueuePage';
 import PaymentCheckoutPage from './pages/payment/PaymentCheckoutPage';
 import PaymentSuccessPage from './pages/payment/PaymentSuccessPage';
 import PaymentFailPage from './pages/payment/PaymentFailPage';
@@ -50,6 +51,14 @@ export default function App() {
 
         <Route path="/login" element={<Loginpage />} />
         <Route path="/ticket/:id" element={<TicketDetailPage />} />
+        <Route
+          path="/queue/:eventId"
+          element={
+            <ProtectedRoute>
+              <QueuePage />
+            </ProtectedRoute>
+          }
+        />
         <Route path="/payment/fail" element={<PaymentFailPage />} />
         <Route
           path="/payment/checkout/:orderId"

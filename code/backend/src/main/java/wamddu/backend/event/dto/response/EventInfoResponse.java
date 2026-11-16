@@ -29,6 +29,8 @@ public class EventInfoResponse {
 
     private String descriptionImageUrl;
 
+    private boolean queueEnabled;
+
     public static EventInfoResponse from(Event event) {
         return EventInfoResponse.builder()
                 .id(event.getId())
@@ -42,6 +44,7 @@ public class EventInfoResponse {
                 .description(event.getDescription())
                 .runningTime(event.getRunning_time())
                 .descriptionImageUrl(event.getDescriptionImageUrl())
+                .queueEnabled(event.isQueueEnabled())
                 .build();
     }
 }

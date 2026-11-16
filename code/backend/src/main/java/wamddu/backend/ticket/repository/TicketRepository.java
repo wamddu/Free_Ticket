@@ -17,6 +17,15 @@ public interface TicketRepository extends JpaRepository<Ticket, Long> {
 
     Optional<Ticket> findByIdAndEventId(Long id, Long eventId);
 
+    interface QueueTarget {
+        Long getEventId();
+        boolean isQueueEnabled();
+    }
+
+    // Read in its own short transaction before the order transaction (see QueueGate).
+    @Query("SELECT E.id AS eventId, E.queueEnabled AS queueEnabled FROM Ticket T JOIN T.event E WHERE T.id = :ticketId")
+    Optional<QueueTarget> findQueueTarget(@Param("ticketId") Long ticketId);
+
     @Query("SELECT T FROM Ticket T JOIN FETCH T.event E WHERE EXISTS " +
             "(SELECT D.id FROM EventDirector D WHERE D.event = E AND D.user.id = :userId) " +
             "ORDER BY T.start_time DESC, T.id ASC")

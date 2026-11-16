@@ -42,6 +42,8 @@ services:
       PAYMENT_RECONCILIATION_START_AT: ${PAYMENT_RECONCILIATION_START_AT:-}
       SPRING_JPA_HIBERNATE_DDL_AUTO: validate
       EVENT_LIST_CACHE_ENABLED: "true"
+      QUEUE_ADMIT_PER_SECOND: ${QUEUE_ADMIT_PER_SECOND:-20}
+      QUEUE_PASS_TTL_SECONDS: ${QUEUE_PASS_TTL_SECONDS:-300}
       REDIS_HOST: redis
       TZ: Asia/Seoul
     depends_on:
@@ -53,7 +55,9 @@ services:
 
   redis:
     image: redis:7.4-alpine
-    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    # volatile-lru: under memory pressure evict only keys with a TTL (list cache, queue passes). The waiting line
+    # and its sequence number have no TTL, so a full cache can never drop users from the queue or reorder it.
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "volatile-lru"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

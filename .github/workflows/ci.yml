@@ -22,6 +22,8 @@ jobs:
       TZ: Asia/Seoul
       # Enables the MySQL-only tests: 100 buyers vs the last ticket, and the Flyway migrations on an empty database.
       RUN_MYSQL_CONCURRENCY: "true"
+      # Enables the waiting queue tests against a real Redis.
+      RUN_REDIS_TESTS: "true"
     services:
       mysql:
         image: mysql:8.0
@@ -34,6 +36,13 @@ jobs:
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pconcurrency-test"
           --health-interval=5s --health-timeout=5s --health-retries=20
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=3s --health-retries=10
     defaults:
       run:
         working-directory: code/backend

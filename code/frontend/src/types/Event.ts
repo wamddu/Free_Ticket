@@ -30,6 +30,8 @@ export type EventDetail = EventSummary & {
   description: string;
   runningTime: number;
   descriptionImageUrl: string;
+  // 인기 공연의 예매 오픈: 주문 전에 대기열을 거친다.
+  queueEnabled?: boolean;
 };
 
 export type TicketOption = {

@@ -21,7 +21,7 @@
 
 - **기간:** 2026.05 ~ (4인 팀)
 - **담당:** 백엔드 전반
-- **2026.11 개선:** 장애 대응 보강, CI/CD 구축, Flyway 도입, 체험 계정 보호, 모니터링, 문서화 ([개선 내역](#개선-내역-202611))
+- **2026.11 개선:** 장애 대응 보강, CI/CD 구축, Flyway 도입, 체험 계정 보호, 모니터링, 예매 대기열, 문서화 ([개선 내역](#개선-내역-202611))
 
 ## 기술 스택
 
@@ -55,6 +55,7 @@ flowchart LR
 - **회원:** 이메일 인증 회원가입, 비밀번호 재설정. Access 토큰과 HttpOnly 쿠키의 Refresh 토큰을 함께 쓴다. Refresh 토큰은 쓸 때마다 새로 발급하고, 이미 쓴 토큰이 다시 오면 그 로그인 전체를 끊는다.
 - **공연:** 카테고리별 목록, 검색, 인기 공연(WHAT'S HOT), 최근 7일 판매 기준 주간 랭킹, AI 공연 검색
 - **예매·결제:** 주문 생성 시 10분간 재고 점유, 토스 결제 승인, 예매 취소(전액 환불)
+- **예매 대기열:** 인기 공연의 예매 오픈에 켜면 Redis 대기열에서 순번을 보여 주고, 초당 20명씩 입장권을 준 사람만 주문할 수 있다([설계](docs/design/waiting-queue.md))
 - **관리자:** 테이블 데이터 관리, 토스 거래 내역과 DB 상태가 다른 결제를 찾아 처리하는 결제 대사 화면
 
 ## 결제 상태
@@ -99,6 +100,9 @@ stateDiagram-v2
 | 한 사용자가 재고를 대량 점유 | 티켓당 미결제 점유 10장 제한 | `InventoryHoldIntegrationTest.oneUserCannotHoldMoreThanTenOfATicket` |
 | 토스 쪽에서만 취소·부분 취소된 거래 | 거래 내역을 주기적으로 대조(설정으로 켬)해 불일치로 기록하고 관리자가 처리 | `PaymentReconciliationIntegrationTest.cancellationAndTwoPartialTransactionsAreRecordedOnceWithoutChangingBooking` |
 | 처리하지 못한 예외 | 빈 403 대신 일관된 JSON 오류(400/404/405/500) 응답 | `ErrorResponseIntegrationTest` |
+| 인기 공연 예매 오픈에 주문이 몰림 | 대기열에서 순서대로 초당 20명만 입장. 입장권 없는 주문은 티켓 잠금 전에 409로 거절 | `WaitingQueueRedisTest.orderWithoutPassIsRefusedBeforeTheTicketLock` |
+| 서버 여러 대가 같은 초에 입장 처리 | 1초에 한 서버만 입장시키는 표시를 Redis에 남겨 N명만 입장 | `WaitingQueueRedisTest.twoServersAdmittingInTheSameSecondLetOnlyNIn` |
+| 대기열용 Redis 장애 | 대기열을 건너뛰고 주문을 받음. 재고는 DB 잠금이 지킴 | `WaitingQueueRedisDownTest` |
 
 ## 성능 측정과 개선
 
@@ -117,10 +121,11 @@ stateDiagram-v2
 | 11월 | 공연 목록이 3,500개 전체(1.15MB)를 반환 | 30개씩 페이지 나누기 | 응답 **1.15MB → 5KB**, p95 약 70% 감소(반환 개수가 3,500 → 30개로 달라 같은 작업의 속도 비교는 아님) ([기록](docs/reports/2026-11-01-event-list-pagination.md)) |
 | 11월 | 같은 목록을 요청마다 DB에서 읽고 JSON으로 만듦 | Redis 캐시 30초(캐시 미스 시 한 번만 조회, Redis 장애 시 DB로 대체) | 동시 500명 성공률 **59% → 100%**, 100명 p95 14.5 → 2.2초 ([기록](docs/reports/2026-11-01-redis-list-cache.md)) |
 | 11/14 | 9월 화면 측정과 같은 시나리오로 9월 버전과 현재 버전 비교 | 같은 데이터에서 번갈아 반복 측정 | 1초 1,000명: 순위 SQL **757 → 7회**, 목록 SQL **749 → 0회**, 장르 화면 p95 1,570 → 1,043ms. 20초 1만 명: DB 시간 **40.5 → 1.3초**, API p95 660 → 406ms ([기록](docs/reports/2026-11-14-page-api-remeasure.md)) |
+| 11/16 | 11/14 시험은 Tomcat 직접 접속·CPU 제한 없음. 운영과 같은 2 vCPU·Caddy 경유로 다시 측정 | 처리 한계 측정, 인기 티켓 주문은 행 잠금이 병목(초당 25건 근처)임을 확인 → 예매 대기열 구현 | 3,000명이 30초에 몰릴 때 주문 p95 **10.9 → 0.69초**. 1만 명이 100초에 걸쳐 오면 **10,001명 모두 주문**(대기열 없으면 35%) ([기록](docs/reports/2026-11-16-capacity-and-queue.md)) |
 
-**남은 병목:** 11/14 재측정에서 20초 동안 1만 명이 방문하면 기본 설정으로는 두 버전 모두 화면의 약 20%가 시간 초과로 실패했다. 서버 연결 한도(8,192)만 올리면 둘 다 100% 성공해서, 원인은 코드가 아니라 연결 설정이었다. 운영 설정은 메모리와 스레드 사용량을 함께 확인한 뒤 바꿀 예정이다.
+**남은 병목:** 11/14에는 연결 한도(8,192)를 올리면 해결된다고 봤지만, 운영과 같은 2 vCPU·Caddy 경유로 다시 재 보니 CPU가 먼저 막혔다(일반 화면 초당 약 100명). 과부하 때 연결 한도까지 연결이 쌓이며 Caddy 메모리가 2GB 넘게 늘어, 한도를 올리면 메모리 부족 위험만 커진다. 그래서 한도는 그대로 두고, 인기 공연은 대기열로 주문 진입 속도를 조절했다. 20초에 1만 명처럼 들어오는 순간 자체가 한계를 넘으면(성공률 19%) 서버 안의 대기열로는 막을 수 없어, 입구를 CDN과 엣지 대기실로 옮기는 작업을 진행 중이다.
 
-**한계:** 부하 생성기와 서버가 같은 PC를 쓰거나(로컬), 생성기 PC 한 대에서 당시 배포 서버(EC2)로 보낸 측정이다. 그래서 응답 시간의 절대값보다 **SQL 실행 횟수, DB 시간, 성공률 같은 서버 쪽 변화**를 개선 근거로 삼았다. 또 측정마다 데이터 규모와 자원 제한(예: 앱·DB 각 0.5 CPU)이 달라서, 서로 다른 행의 수치를 직접 비교하지 않는다.
+**한계:** 부하 생성기와 서버가 같은 PC를 쓰거나(로컬, 11/16은 CPU만 분리), 생성기 PC 한 대에서 당시 배포 서버(EC2)로 보낸 측정이다. 그래서 응답 시간의 절대값보다 **SQL 실행 횟수, DB 시간, 성공률 같은 서버 쪽 변화**를 개선 근거로 삼았다. 또 측정마다 데이터 규모와 자원 제한(예: 앱·DB 각 0.5 CPU)이 달라서, 서로 다른 행의 수치를 직접 비교하지 않는다.
 
 ## 모니터링
 
@@ -133,7 +138,7 @@ stateDiagram-v2
 
 ## 테스트와 CI/CD
 
-- 백엔드 테스트 369개. H2 단위·통합 테스트에 더해 **MySQL 8.0 컨테이너에서** 동시성 테스트와 마이그레이션 검증을 실행한다.
+- 백엔드 테스트 388개. H2 단위·통합 테스트에 더해 **MySQL 8.0 컨테이너에서** 동시성 테스트와 마이그레이션 검증을 실행한다.
 - GitHub Actions가 main 푸시와 PR마다 백엔드 테스트와 프론트 린트·테스트·빌드를 실행한다.
 - **CD:** main에서 CI가 통과하면 이미지를 GHCR에 올리고, AWS SSM으로 서버에 배포한다. Lightsail은 IAM 역할을 붙일 수 없어 하이브리드 활성화로 SSM에 등록했다. 배포 전 DB를 백업하고, `/health`가 UP이 되지 않으면 이전 버전으로 되돌린다. SSH 포트를 열거나 AWS 키를 저장하지 않고 OIDC 임시 권한을 쓴다([배포 문서](docs/deploy.md#자동-배포-cd)).
 - `FlywayMigrationTest`가 빈 MySQL에 모든 마이그레이션을 적용한 뒤, 엔티티와 테이블이 일치하는지 검사한다.
@@ -150,6 +155,7 @@ stateDiagram-v2
 - **자동 배포(CD):** main에 푸시하면 테스트 통과 → 이미지 빌드 → DB 백업 → 배포 → `/health` 확인까지 진행하고, 실패하면 이전 버전으로 되돌린다.
 - **공개 체험 계정 보호**와 **로컬 데모 데이터:** 데모 데이터는 실행일 기준 날짜로 만든다.
 - **모니터링:** Prometheus·Grafana로 API, 서버 자원, 결제 복구 상태를 보고, UptimeRobot으로 바깥에서 서버가 살아 있는지 확인한다.
+- **예매 대기열:** 운영과 같은 조건의 측정에서 인기 티켓 주문의 한계를 찾고, 그 값(초당 20명)으로 입장시키는 대기열을 만들었다. 측정 중 순번 확인의 경쟁 조건(0.8% 누락)을 찾아 재현 테스트와 함께 고쳤다.
 
 ## 로컬 실행
 
@@ -175,6 +181,7 @@ npm run dev                 # http://localhost:5173
 ## 문서
 
 - [데이터베이스 설계](docs/database.md): ERD, 제약 조건, 동시성, 스키마 변경 방법
-- [배포](docs/deploy.md): Lightsail 배포, 자동 배포(CD) 설정, 복구, 모니터링
+- [배포](docs/deploy.md): Lightsail 배포, 자동 배포(CD) 설정, 복구, 모니터링, 대기열 운영
+- [예매 대기열 설계](docs/design/waiting-queue.md)
 - 장애 대응: [결제 복구 설계](docs/reports/2026-09-19-payment-recovery.md), [복구 스케줄러](docs/reports/2026-09-20-payment-recovery-scheduler.md), [마지막 티켓 동시 주문](docs/reports/2026-09-25-last-ticket-concurrency.md), [결제 대사 실연동 검증](docs/reports/2026-09-28-payment-reconciliation-toss-test.md), [관리자 결제 처리](docs/reports/2026-09-29-admin-payment-operations.md)
-- 성능: [예매 내역 N+1](docs/reports/2026-09-15-reservation-list-n-plus-1.md), [HOT API](docs/reports/2026-09-24-hot-api-performance.md), [화면 단위 측정](docs/reports/2026-09-25-page-api-performance.md), [10월 종합 측정](docs/reports/2026-10-31-local-performance-baseline.md), [주문 인덱스](docs/reports/2026-10-31-orders-ticket-index.md), [인증 인덱스](docs/reports/2026-10-31-auth-indexes.md), [로그인 병목](docs/reports/2026-11-01-login-bottleneck.md), [토큰 정리 분리](docs/reports/2026-11-01-token-cleanup.md), [목록 페이지 나누기](docs/reports/2026-11-01-event-list-pagination.md), [Redis 목록 캐시](docs/reports/2026-11-01-redis-list-cache.md), [화면 단위 재측정](docs/reports/2026-11-14-page-api-remeasure.md)
+- 성능: [예매 내역 N+1](docs/reports/2026-09-15-reservation-list-n-plus-1.md), [HOT API](docs/reports/2026-09-24-hot-api-performance.md), [화면 단위 측정](docs/reports/2026-09-25-page-api-performance.md), [10월 종합 측정](docs/reports/2026-10-31-local-performance-baseline.md), [주문 인덱스](docs/reports/2026-10-31-orders-ticket-index.md), [인증 인덱스](docs/reports/2026-10-31-auth-indexes.md), [로그인 병목](docs/reports/2026-11-01-login-bottleneck.md), [토큰 정리 분리](docs/reports/2026-11-01-token-cleanup.md), [목록 페이지 나누기](docs/reports/2026-11-01-event-list-pagination.md), [Redis 목록 캐시](docs/reports/2026-11-01-redis-list-cache.md), [화면 단위 재측정](docs/reports/2026-11-14-page-api-remeasure.md), [처리 한계와 대기열](docs/reports/2026-11-16-capacity-and-queue.md)

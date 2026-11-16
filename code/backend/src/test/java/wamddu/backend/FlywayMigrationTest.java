@@ -66,7 +66,7 @@ class FlywayMigrationTest {
     void emptyDatabaseRunsEveryMigrationAndMatchesTheEntities() throws SQLException {
         // Context startup already ran the migrations and the ddl-auto=validate check.
         assertThat(Arrays.stream(flyway.info().applied()).map(info -> info.getVersion().getVersion()))
-                .containsExactly("1", "2");
+                .containsExactly("1", "2", "3");
         assertThat(hasStatusPaidAtIndex(EMPTY_DB_URL)).isTrue();
     }
 
@@ -86,11 +86,11 @@ class FlywayMigrationTest {
                 .load()
                 .migrate();
 
-        assertThat(result.migrationsExecuted).isEqualTo(1);
-        assertThat(result.migrations).extracting(migration -> migration.version).containsExactly("2");
+        assertThat(result.migrationsExecuted).isEqualTo(2);
+        assertThat(result.migrations).extracting(migration -> migration.version).containsExactly("2", "3");
         MigrationInfo[] applied = Flyway.configure().dataSource(EXISTING_DB_URL, "root", PASSWORD).load()
                 .info().applied();
-        assertThat(applied).extracting(info -> info.getType().name()).containsExactly("BASELINE", "SQL");
+        assertThat(applied).extracting(info -> info.getType().name()).containsExactly("BASELINE", "SQL", "SQL");
         assertThat(hasStatusPaidAtIndex(EXISTING_DB_URL)).isTrue();
     }
 

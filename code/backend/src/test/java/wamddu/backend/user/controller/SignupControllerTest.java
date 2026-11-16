@@ -15,6 +15,7 @@ import wamddu.backend.order.controller.OrderController;
 import wamddu.backend.order.service.OrderService;
 import wamddu.backend.payment.controller.PaymentController;
 import wamddu.backend.payment.service.PaymentService;
+import wamddu.backend.queue.QueueGate;
 import wamddu.backend.user.dto.request.SignupRequest;
 import wamddu.backend.user.dto.response.SignupResponse;
 import wamddu.backend.user.dto.response.UserInfoResponse;
@@ -31,6 +32,7 @@ class SignupControllerTest {
     @Mock private UserService userService;
     @Mock private OrderService orderService;
     @Mock private PaymentService paymentService;
+    @Mock private QueueGate queueGate;
     private MockMvc mvc;
     private static final String VALID = """
             {"username":"홍길동","password":"password123!","email":"user@example.com","phonenumber":"01012345678","emailVerificationToken":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
@@ -39,7 +41,7 @@ class SignupControllerTest {
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders.standaloneSetup(new UserController(userService),
-                        new OrderController(orderService), new PaymentController(paymentService))
+                        new OrderController(orderService, queueGate), new PaymentController(paymentService))
                 .setControllerAdvice(new ApiExceptionHandler()).build();
     }
 

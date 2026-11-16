@@ -223,6 +223,21 @@ Prometheus는 같은 서버 안에 있어서 서버가 통째로 멈추면 알�
 2. 키워드 감시를 쓸 경우 `"status":"UP"`이 있는지 확인하게 한다. DB가 끊기면 `/health`가 503을 돌려준다.
 3. 알림 받을 메일을 등록한다. 서버 IP가 바뀌면 이 URL도 바꾼다.
 
+## 예매 대기열
+
+인기 공연의 예매 오픈에는 대기열을 켠다([설계](design/waiting-queue.md)). 켜진 공연은 Redis 대기열에서 순서대로 입장권을 받아야 주문할 수 있다.
+
+- 켜기·끄기: 관리자 화면 → `events` 테이블 → 해당 공연의 `queue_enabled`를 `1`(켜기) 또는 `0`(끄기)으로 수정한다.
+- 입장 속도와 입장권 유효 시간은 환경 변수로 바꾼다. 기본값은 측정에 맞춘 값이다.
+
+| 변수 | 기본값 | 내용 |
+|---|---|---|
+| `QUEUE_ADMIT_PER_SECOND` | 20 | 공연별 초당 입장 인원. 2 vCPU 서버에서 인기 티켓 하나의 주문 단계가 1초 안에 끝나는 수준 |
+| `QUEUE_PASS_TTL_SECONDS` | 300 | 입장권 유효 시간(초) |
+
+- Grafana의 `freeticket_queue_waiting`(대기 인원), `freeticket_queue_admitted_total`(입장), `freeticket_queue_rejected_total`(입장권 없이 주문 시도)로 상태를 본다.
+- Redis가 멈추면 대기열을 건너뛰고 주문을 받는다. 재고는 DB 잠금이 지키므로 잘못 팔리지는 않지만 느려질 수 있다. `freeticket_queue_redis_errors_total`이 늘면 Redis를 확인한다.
+
 ## 백업에서 복구
 
 자동 배포는 매번 `~/backups/free_ticket-<시각>-<커밋>.sql`에 백업을 남긴다(최근 10개).

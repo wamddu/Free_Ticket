@@ -20,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import wamddu.backend.global.exception.ApiException;
 import wamddu.backend.global.exception.ApiExceptionHandler;
+import wamddu.backend.queue.QueueGate;
 import wamddu.backend.order.dto.request.CreateOrderRequest;
 import wamddu.backend.order.dto.response.CheckoutOrderResponse;
 import wamddu.backend.order.dto.response.ReservationHistoryResponse;
@@ -44,6 +45,11 @@ class OrderControllerTest {
 
     @Mock
     private OrderService orderService;
+
+    @Mock
+
+    private QueueGate queueGate;
+
 
     @InjectMocks
     private OrderController orderController;
