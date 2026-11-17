@@ -21,7 +21,7 @@
 
 - **기간:** 2026.05 ~ (4인 팀)
 - **담당:** 백엔드 전반
-- **2026.11 개선:** 장애 대응 보강, CI/CD 구축, Flyway 도입, 체험 계정 보호, 모니터링, 예매 대기열, 문서화 ([개선 내역](#개선-내역-202611))
+- **2026.11 개선:** 장애 대응 보강, CI/CD 구축, Flyway 도입, 체험 계정 보호, 모니터링, 예매 대기열, CDN·엣지 대기실, 문서화 ([개선 내역](#개선-내역-202611))
 
 ## 기술 스택
 
@@ -32,6 +32,7 @@
 | 외부 연동 | 토스페이먼츠(결제·취소·거래 조회), 네이버 SMTP(메일 인증), Gemini(AI 공연 검색), 네이버 지도 |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS, Vitest |
 | 인프라 | AWS Lightsail, Docker Compose, Caddy(HTTPS·리버스 프록시), GitHub Actions(CI/CD), GHCR, AWS SSM |
+| 엣지 (대규모 예매 오픈용) | AWS CloudFront, API Gateway, Lambda(Python), DynamoDB, CloudFormation |
 | 모니터링 | Spring Boot Actuator, Micrometer, Prometheus, Grafana, UptimeRobot(외부 감시) |
 
 ## 구성
@@ -50,12 +51,24 @@ flowchart LR
     U[UptimeRobot] -->|5분마다 /health| C
 ```
 
+**대규모 예매 오픈용 구성** (측정용 서버에서 검증, 운영 주소에는 아직 적용하지 않음. [설계](docs/design/edge-waiting-room.md))
+
+```mermaid
+flowchart LR
+    B[브라우저] -->|HTTPS| CF[CloudFront<br/>정적 파일·공연 조회 2초 캐시]
+    CF -->|/api/queue/*| AG[API Gateway] --> L[Lambda<br/>대기실] --> D[(DynamoDB<br/>번호·입장 수)]
+    A[Lambda<br/>초당 20명 입장] --> D
+    CF -->|주문·결제 등<br/>입장 토큰 헤더| C[Caddy → Spring Boot]
+```
+
+새 방문자의 HTTPS 연결, 공연 조회, 대기열 등록·순번 확인을 서버 밖에서 처리하고, 서버에는 입장 토큰(JWT)을 받은 사람의 주문만 오게 한다.
+
 ## 주요 기능
 
 - **회원:** 이메일 인증 회원가입, 비밀번호 재설정. Access 토큰과 HttpOnly 쿠키의 Refresh 토큰을 함께 쓴다. Refresh 토큰은 쓸 때마다 새로 발급하고, 이미 쓴 토큰이 다시 오면 그 로그인 전체를 끊는다.
 - **공연:** 카테고리별 목록, 검색, 인기 공연(WHAT'S HOT), 최근 7일 판매 기준 주간 랭킹, AI 공연 검색
 - **예매·결제:** 주문 생성 시 10분간 재고 점유, 토스 결제 승인, 예매 취소(전액 환불)
-- **예매 대기열:** 인기 공연의 예매 오픈에 켜면 Redis 대기열에서 순번을 보여 주고, 초당 20명씩 입장권을 준 사람만 주문할 수 있다([설계](docs/design/waiting-queue.md))
+- **예매 대기열:** 인기 공연의 예매 오픈에 켜면 Redis 대기열에서 순번을 보여 주고, 초당 20명씩 입장권을 준 사람만 주문할 수 있다([설계](docs/design/waiting-queue.md)). 같은 규칙을 서버 밖(Lambda·DynamoDB)에서 처리하는 엣지 대기실도 있다([설계](docs/design/edge-waiting-room.md))
 - **관리자:** 테이블 데이터 관리, 토스 거래 내역과 DB 상태가 다른 결제를 찾아 처리하는 결제 대사 화면
 
 ## 결제 상태
@@ -139,8 +152,8 @@ stateDiagram-v2
 
 ## 테스트와 CI/CD
 
-- 백엔드 테스트 388개. H2 단위·통합 테스트에 더해 **MySQL 8.0 컨테이너에서** 동시성 테스트와 마이그레이션 검증을 실행한다.
-- GitHub Actions가 main 푸시와 PR마다 백엔드 테스트와 프론트 린트·테스트·빌드를 실행한다.
+- 백엔드 테스트 399개, 프론트 132개, 엣지 대기실 Lambda 10개(pytest, 가짜 DynamoDB). H2 단위·통합 테스트에 더해 **MySQL 8.0 컨테이너에서** 동시성 테스트와 마이그레이션 검증을 실행한다.
+- GitHub Actions가 main 푸시와 PR마다 백엔드 테스트, 프론트 린트·테스트·빌드, 엣지 대기실 테스트와 CloudFormation 템플릿 검사를 실행한다.
 - **CD:** main에서 CI가 통과하면 이미지를 GHCR에 올리고, AWS SSM으로 서버에 배포한다. Lightsail은 IAM 역할을 붙일 수 없어 하이브리드 활성화로 SSM에 등록했다. 배포 전 DB를 백업하고, `/health`가 UP이 되지 않으면 이전 버전으로 되돌린다. SSH 포트를 열거나 AWS 키를 저장하지 않고 OIDC 임시 권한을 쓴다([배포 문서](docs/deploy.md#자동-배포-cd)).
 - `FlywayMigrationTest`가 빈 MySQL에 모든 마이그레이션을 적용한 뒤, 엔티티와 테이블이 일치하는지 검사한다.
 
@@ -157,6 +170,7 @@ stateDiagram-v2
 - **공개 체험 계정 보호**와 **로컬 데모 데이터:** 데모 데이터는 실행일 기준 날짜로 만든다.
 - **모니터링:** Prometheus·Grafana로 API, 서버 자원, 결제 복구 상태를 보고, UptimeRobot으로 바깥에서 서버가 살아 있는지 확인한다.
 - **예매 대기열:** 운영과 같은 조건의 측정에서 인기 티켓 주문의 한계를 찾고, 그 값(초당 20명)으로 입장시키는 대기열을 만들었다. 측정 중 순번 확인의 경쟁 조건(0.8% 누락)을 찾아 재현 테스트와 함께 고쳤다.
+- **CDN과 엣지 대기실:** 20초에 1만 명이면 서버 안의 대기열로는 19%만 성공해, HTTPS·공개 데이터·대기열을 CloudFront와 Lambda로 옮겼다. 측정용 서버에서 51% → 99.94%. 처음에는 Lambda 동시 실행 계정 한도(10) 때문에 40%였는데, 서버는 한가하고 API Gateway가 503을 내는 것을 보고 원인을 찾았다. 또 부하 도구는 Origin 헤더를 보내지 않아 놓친 문제(CloudFront 주소에서 로그인 403)를 브라우저 확인에서 찾아 고쳤다.
 
 ## 로컬 실행
 
@@ -183,6 +197,6 @@ npm run dev                 # http://localhost:5173
 
 - [데이터베이스 설계](docs/database.md): ERD, 제약 조건, 동시성, 스키마 변경 방법
 - [배포](docs/deploy.md): Lightsail 배포, 자동 배포(CD) 설정, 복구, 모니터링, 대기열 운영
-- [예매 대기열 설계](docs/design/waiting-queue.md)
+- [예매 대기열 설계](docs/design/waiting-queue.md), [CDN과 엣지 대기실 설계](docs/design/edge-waiting-room.md)
 - 장애 대응: [결제 복구 설계](docs/reports/2026-09-19-payment-recovery.md), [복구 스케줄러](docs/reports/2026-09-20-payment-recovery-scheduler.md), [마지막 티켓 동시 주문](docs/reports/2026-09-25-last-ticket-concurrency.md), [결제 대사 실연동 검증](docs/reports/2026-09-28-payment-reconciliation-toss-test.md), [관리자 결제 처리](docs/reports/2026-09-29-admin-payment-operations.md)
 - 성능: [예매 내역 N+1](docs/reports/2026-09-15-reservation-list-n-plus-1.md), [HOT API](docs/reports/2026-09-24-hot-api-performance.md), [화면 단위 측정](docs/reports/2026-09-25-page-api-performance.md), [10월 종합 측정](docs/reports/2026-10-31-local-performance-baseline.md), [주문 인덱스](docs/reports/2026-10-31-orders-ticket-index.md), [인증 인덱스](docs/reports/2026-10-31-auth-indexes.md), [로그인 병목](docs/reports/2026-11-01-login-bottleneck.md), [토큰 정리 분리](docs/reports/2026-11-01-token-cleanup.md), [목록 페이지 나누기](docs/reports/2026-11-01-event-list-pagination.md), [Redis 목록 캐시](docs/reports/2026-11-01-redis-list-cache.md), [화면 단위 재측정](docs/reports/2026-11-14-page-api-remeasure.md), [처리 한계와 대기열](docs/reports/2026-11-16-capacity-and-queue.md)
