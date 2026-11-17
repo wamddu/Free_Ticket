@@ -265,6 +265,14 @@ aws cloudformation describe-stacks --stack-name free-ticket-edge --query "Stacks
 ```
 
 - `JWT_SECRET`은 서버 `.env.deploy`의 같은 이름 값, `QUEUE_TOKEN_SECRET`은 1에서 만든 값이다. `read -s`라 화면에 보이지 않는다.
+- 따로 적어 둔 값이 아니라 **지금 서버 `.env.deploy`의 값**을 넣는다(따옴표 제외). 다르면 서버는 로그인을 받는데 대기실만 401을 돌려준다. 넣기 전에 양쪽 지문을 비교한다.
+
+  ```sh
+  # 서버
+  grep '^JWT_SECRET=' .env.deploy | cut -d= -f2- | tr -d '"\r\n' | sha256sum | cut -c1-12
+  # CloudShell (read로 넣은 뒤)
+  printf %s "$JWT" | sha256sum | cut -c1-12
+  ```
 - CloudFront 생성에 5~10분 걸린다. 끝나면 `SiteUrl`(예: `https://d1234.cloudfront.net`)이 새 접속 주소다.
 
 **3. 주소를 바꾼다**

@@ -4,7 +4,9 @@
 
 [![CI](https://github.com/wamddu/Free_Ticket/actions/workflows/ci.yml/badge.svg)](https://github.com/wamddu/Free_Ticket/actions/workflows/ci.yml)
 
-**배포:** https://13-209-194-94.sslip.io (토스 테스트 모드, 실제 결제되지 않음)
+**배포:** https://d3t7hzixj163gm.cloudfront.net (토스 테스트 모드, 실제 결제되지 않음)
+
+서버 주소(https://13-209-194-94.sslip.io)로도 열리지만, 그쪽은 CDN과 엣지 대기실을 거치지 않는다.
 
 **운영 모니터링:** [Grafana 대시보드](https://13-209-194-94.sslip.io/grafana/d/free-ticket) (로그인 없이 보기만 가능) · [상태 확인](https://13-209-194-94.sslip.io/health)
 
@@ -32,10 +34,12 @@
 | 외부 연동 | 토스페이먼츠(결제·취소·거래 조회), 네이버 SMTP(메일 인증), Gemini(AI 공연 검색), 네이버 지도 |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS, Vitest |
 | 인프라 | AWS Lightsail, Docker Compose, Caddy(HTTPS·리버스 프록시), GitHub Actions(CI/CD), GHCR, AWS SSM |
-| 엣지 (대규모 예매 오픈용) | AWS CloudFront, API Gateway, Lambda(Python), DynamoDB, CloudFormation |
+| 엣지 (CDN·대기실) | AWS CloudFront, API Gateway, Lambda(Python), DynamoDB, CloudFormation |
 | 모니터링 | Spring Boot Actuator, Micrometer, Prometheus, Grafana, UptimeRobot(외부 감시) |
 
 ## 구성
+
+**서버**
 
 ```mermaid
 flowchart LR
@@ -51,7 +55,7 @@ flowchart LR
     U[UptimeRobot] -->|5분마다 /health| C
 ```
 
-**대규모 예매 오픈용 구성** (측정용 서버에서 검증, 운영 주소에는 아직 적용하지 않음. [설계](docs/design/edge-waiting-room.md))
+**앞단: CDN과 엣지 대기실** (운영 적용 2026-11-18. [설계](docs/design/edge-waiting-room.md))
 
 ```mermaid
 flowchart LR
@@ -61,7 +65,7 @@ flowchart LR
     CF -->|주문·결제 등<br/>입장 토큰 헤더| C[Caddy → Spring Boot]
 ```
 
-새 방문자의 HTTPS 연결, 공연 조회, 대기열 등록·순번 확인을 서버 밖에서 처리하고, 서버에는 입장 토큰(JWT)을 받은 사람의 주문만 오게 한다.
+새 방문자의 HTTPS 연결, 공연 조회, 대기열 등록·순번 확인을 서버 밖에서 처리하고, 서버에는 입장 토큰(JWT)을 받은 사람의 주문만 오게 한다. 운영에서는 공연 "마지막 편지"에 대기열을 켜 두어, 예매하면 대기 화면을 거친다.
 
 ## 주요 기능
 

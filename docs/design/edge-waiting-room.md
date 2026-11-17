@@ -1,6 +1,6 @@
 # CDN과 엣지 대기실 설계
 
-상태: 구현 완료, 측정용 서버에서 검증 (2026-11-17). 20초에 1만 명이 99.94% 성공했다([측정](../reports/2026-11-16-capacity-and-queue.md#4-cdn과-엣지-대기실-aws-20초에-1만-명)). [서버 내 대기열](waiting-queue.md)의 다음 단계다. 배포 방법은 [배포 문서](../deploy.md#cdn과-엣지-대기실-cloudfront)에 있다.
+상태: 운영 적용 (2026-11-18, https://d3t7hzixj163gm.cloudfront.net). 측정용 서버에서 검증(2026-11-17)한 뒤 같은 템플릿으로 운영 서버 앞에 띄웠다. 20초에 1만 명이 99.94% 성공했다([측정](../reports/2026-11-16-capacity-and-queue.md#4-cdn과-엣지-대기실-aws-20초에-1만-명)). [서버 내 대기열](waiting-queue.md)의 다음 단계다. 배포 방법은 [배포 문서](../deploy.md#cdn과-엣지-대기실-cloudfront)에 있다.
 
 ## 왜 필요한가
 
