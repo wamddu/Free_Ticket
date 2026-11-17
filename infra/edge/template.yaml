@@ -1,0 +1,242 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Free Ticket edge: CloudFront in front of the Lightsail server, and the waiting room (API Gateway + Lambda + DynamoDB)
+  so a crowd's HTTPS handshakes, event page reads and queue polling never reach the server. See docs/design/edge-waiting-room.md.
+
+Parameters:
+  OriginDomain:
+    Type: String
+    Description: The Lightsail server's HTTPS host (Caddy), e.g. 13-209-194-94.sslip.io
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    Description: Same value as JWT_SECRET in .env.deploy. The waiting room checks the service's access tokens with it.
+  QueueTokenSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    Description: New random value (openssl rand -hex 32). Also set as QUEUE_TOKEN_SECRET in .env.deploy.
+  AdmitPerSecond:
+    Type: Number
+    Default: 20
+    Description: Users admitted per event per second. Measured limit for one hot ticket on the 2 vCPU server.
+
+Resources:
+  # Waiting room data
+
+  QueueEvents:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
+      KeySchema: [{ AttributeName: id, KeyType: HASH }]
+
+  QueueTickets:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{ AttributeName: id, AttributeType: S }]
+      KeySchema: [{ AttributeName: id, KeyType: HASH }]
+      TimeToLiveSpecification: { AttributeName: ttl, Enabled: true }
+
+  # Waiting room functions
+
+  QueueRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: queue-tables
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:Scan]
+                Resource: [!GetAtt QueueEvents.Arn, !GetAtt QueueTickets.Arn]
+
+  WaitingRoomFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.12
+      Handler: waiting_room.handler
+      Code: lambda/
+      MemorySize: 256
+      Timeout: 5
+      Role: !GetAtt QueueRole.Arn
+      Environment:
+        Variables:
+          EVENTS: !Ref QueueEvents
+          TICKETS: !Ref QueueTickets
+          JWT_SECRET: !Ref JwtSecret
+          QUEUE_TOKEN_SECRET: !Ref QueueTokenSecret
+          ADMIT_PER_SECOND: !Ref AdmitPerSecond
+
+  AdmitterFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.12
+      Handler: admitter.handler
+      Code: lambda/
+      MemorySize: 128
+      Timeout: 65
+      Role: !GetAtt QueueRole.Arn
+      Environment:
+        Variables:
+          EVENTS: !Ref QueueEvents
+          ADMIT_PER_SECOND: !Ref AdmitPerSecond
+
+  # Started every minute; each run admits once per second for that minute.
+  AdmitterSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: rate(1 minute)
+      Targets: [{ Id: admitter, Arn: !GetAtt AdmitterFunction.Arn }]
+
+  AdmitterSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AdmitterFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt AdmitterSchedule.Arn
+
+  # Waiting room API (same paths as the server's own queue, so the waiting page does not change)
+
+  QueueApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub "${AWS::StackName}-queue"
+      ProtocolType: HTTP
+
+  QueueApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref QueueApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt WaitingRoomFunction.Arn
+      PayloadFormatVersion: "2.0"
+
+  QueueJoinRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref QueueApi
+      RouteKey: POST /api/queue/{eventId}
+      Target: !Sub "integrations/${QueueApiIntegration}"
+
+  QueueStatusRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref QueueApi
+      RouteKey: GET /api/queue/{eventId}
+      Target: !Sub "integrations/${QueueApiIntegration}"
+
+  QueueApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref QueueApi
+      StageName: $default
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 3000
+        ThrottlingRateLimit: 2000
+
+  QueueApiPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WaitingRoomFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${QueueApi}/*"
+
+  # CloudFront
+
+  # Public event API: the server marks it "public, max-age=2". No cookies or headers in the key or sent to the
+  # server, so one visitor's session can never be cached for another.
+  EventsCachePolicy:
+    Type: AWS::CloudFront::CachePolicy
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub "${AWS::StackName}-public-events"
+        MinTTL: 0
+        DefaultTTL: 2
+        MaxTTL: 2
+        ParametersInCacheKeyAndForwardedToOrigin:
+          EnableAcceptEncodingGzip: true
+          EnableAcceptEncodingBrotli: true
+          CookiesConfig: { CookieBehavior: none }
+          HeadersConfig: { HeaderBehavior: none }
+          QueryStringsConfig: { QueryStringBehavior: all }
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: Free Ticket
+        HttpVersion: http2and3
+        PriceClass: PriceClass_200
+        Origins:
+          - Id: server
+            DomainName: !Ref OriginDomain
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+              OriginReadTimeout: 60
+              OriginKeepaliveTimeout: 60
+          - Id: queue
+            DomainName: !Sub "${QueueApi}.execute-api.${AWS::Region}.amazonaws.com"
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+        # Login, orders, payments, my page, admin, the SPA's index.html: never cached, cookies and
+        # Authorization go to the server unchanged.
+        DefaultCacheBehavior:
+          TargetOriginId: server
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+          Compress: true
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # Managed-CachingDisabled
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # Managed-AllViewerExceptHostHeader
+        CacheBehaviors:
+          - PathPattern: /api/queue/*
+            TargetOriginId: queue
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # Managed-CachingDisabled
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # Managed-AllViewerExceptHostHeader
+          - PathPattern: /api/events*
+            TargetOriginId: server
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            Compress: true
+            CachePolicyId: !Ref EventsCachePolicy
+          - PathPattern: /assets/*
+            TargetOriginId: server
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # Managed-CachingOptimized (file names carry a hash)
+        # Do not keep server errors at the edge.
+        CustomErrorResponses:
+          - { ErrorCode: 500, ErrorCachingMinTTL: 0 }
+          - { ErrorCode: 502, ErrorCachingMinTTL: 0 }
+          - { ErrorCode: 503, ErrorCachingMinTTL: 0 }
+          - { ErrorCode: 504, ErrorCachingMinTTL: 0 }
+
+Outputs:
+  SiteUrl:
+    Description: The site through CloudFront
+    Value: !Sub "https://${Distribution.DomainName}"
+  QueueApiUrl:
+    Description: Waiting room API (reach it through CloudFront)
+    Value: !Sub "https://${QueueApi}.execute-api.${AWS::Region}.amazonaws.com"
+  EventsTable:
+    Value: !Ref QueueEvents

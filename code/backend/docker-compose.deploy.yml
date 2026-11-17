@@ -44,6 +44,8 @@ services:
       EVENT_LIST_CACHE_ENABLED: "true"
       QUEUE_ADMIT_PER_SECOND: ${QUEUE_ADMIT_PER_SECOND:-20}
       QUEUE_PASS_TTL_SECONDS: ${QUEUE_PASS_TTL_SECONDS:-300}
+      # Entry tokens from the edge waiting room (infra/edge). Empty until the CloudFront stack is deployed.
+      QUEUE_TOKEN_SECRET: ${QUEUE_TOKEN_SECRET:-}
       REDIS_HOST: redis
       TZ: Asia/Seoul
     depends_on:

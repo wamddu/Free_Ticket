@@ -43,10 +43,10 @@ export default function QueuePage() {
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
-    const order = async () => {
+    const order = async (token?: string | null) => {
       setOrdering(true);
       try {
-        const created = await createOrder(ticketId, quantity);
+        const created = await createOrder(ticketId, quantity, token);
         if (active) navigate(`/payment/checkout/${created.orderId}`, { replace: true });
       } catch (orderError) {
         if (!active) return;
@@ -67,13 +67,14 @@ export default function QueuePage() {
         if (!active) return;
         setStatus(next);
         if (next.admitted) {
-          await order();
+          await order(next.token);
           return;
         }
         timer = setTimeout(() => void step(getQueueStatus), (next.nextPollSeconds ?? 5) * 1000);
       } catch (queueError) {
         if (!active) return;
-        if (errorCode(queueError) === "QUEUE_NOT_JOINED") {
+        // Not in line (yet), or the edge waiting room's pass ran out: join again.
+        if (errorCode(queueError) === "QUEUE_NOT_JOINED" || errorCode(queueError) === "QUEUE_PASS_EXPIRED") {
           void step(enterQueue);
           return;
         }

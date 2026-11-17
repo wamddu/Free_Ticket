@@ -9,6 +9,8 @@ export type QueueStatus = {
   estimatedWaitSeconds: number | null;
   nextPollSeconds: number | null;
   passExpiresInSeconds: number | null;
+  // Only from the edge waiting room: send it with the order (X-Queue-Token).
+  token?: string | null;
 };
 
 export async function enterQueue(eventId: number) {
