@@ -4,6 +4,7 @@ import { AxiosError, AxiosHeaders } from "axios";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api } from "../api/axios";
+import { busyRetryDelayMs } from "../lib/backoff";
 import QueuePage from "./QueuePage";
 
 const waiting = (position: number, nextPollSeconds: number) => ({
@@ -94,4 +95,29 @@ test("대기열을 쓸 수 없으면(bypassed) 바로 주문한다", async () =>
   await flush();
 
   expect(screen.getByText("결제 화면")).toBeTruthy();
+});
+
+test("대기실이 잠시 과부하(503)면 순번을 잃지 않고 간격을 늘려 다시 묻는다", async () => {
+  let joins = 0;
+  vi.spyOn(api, "post").mockImplementation(async (url: string) => {
+    if (url !== "/queue/7") return ok(order);
+    joins += 1;
+    if (joins <= 2) throw apiError(503, "Service Unavailable");
+    return ok(waiting(4, 2));
+  });
+  vi.spyOn(Math, "random").mockReturnValue(0);
+
+  openQueue();
+  await flush();
+  expect(joins).toBe(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+  expect(joins).toBe(2);
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(joins).toBe(3);
+  expect(screen.getByLabelText("대기 순서").textContent).toBe("3명");
+});
+
+test("재시도 간격은 1·2·4·8초 뒤 10초에서 멈추고 1초 안쪽의 흔들림을 더한다", () => {
+  expect([0, 1, 2, 3, 4, 7].map((n) => busyRetryDelayMs(n, () => 0))).toEqual([1000, 2000, 4000, 8000, 10000, 10000]);
+  expect(busyRetryDelayMs(0, () => 0.999)).toBe(1999);
 });

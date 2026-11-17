@@ -4,10 +4,20 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 
 import { createOrder } from "../api/orders";
 import { enterQueue, getQueueStatus, type QueueStatus } from "../api/queue";
+import { busyRetryDelayMs } from "../lib/backoff";
 
 function errorCode(error: unknown) {
   return axios.isAxiosError(error) ? (error.response?.data?.code as string | undefined) : undefined;
 }
+
+// Overloaded or briefly unreachable (e.g. the waiting room's Lambda was throttled): worth asking again.
+function isBusy(error: unknown) {
+  if (!axios.isAxiosError(error)) return false;
+  const status = error.response?.status;
+  return status === undefined || status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+const MAX_BUSY_RETRIES = 8;
 
 function errorMessage(error: unknown) {
   return axios.isAxiosError(error) ? (error.response?.data?.message as string | undefined) : undefined;
@@ -42,6 +52,7 @@ export default function QueuePage() {
     if (invalid) return;
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let busyRetries = 0;
 
     const order = async (token?: string | null) => {
       setOrdering(true);
@@ -65,6 +76,7 @@ export default function QueuePage() {
       try {
         const next = await load(eventId);
         if (!active) return;
+        busyRetries = 0;
         setStatus(next);
         if (next.admitted) {
           await order(next.token);
@@ -76,6 +88,12 @@ export default function QueuePage() {
         // Not in line (yet), or the edge waiting room's pass ran out: join again.
         if (errorCode(queueError) === "QUEUE_NOT_JOINED" || errorCode(queueError) === "QUEUE_PASS_EXPIRED") {
           void step(enterQueue);
+          return;
+        }
+        // Keep the place in line through a short overload instead of failing on the first refusal.
+        if (isBusy(queueError) && busyRetries < MAX_BUSY_RETRIES) {
+          timer = setTimeout(() => void step(load), busyRetryDelayMs(busyRetries));
+          busyRetries += 1;
           return;
         }
         setFailure(errorMessage(queueError) ?? "대기열 정보를 불러오지 못했습니다.");
