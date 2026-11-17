@@ -238,6 +238,49 @@ Prometheus는 같은 서버 안에 있어서 서버가 통째로 멈추면 알�
 - Grafana의 `freeticket_queue_waiting`(대기 인원), `freeticket_queue_admitted_total`(입장), `freeticket_queue_rejected_total`(입장권 없이 주문 시도)로 상태를 본다.
 - Redis가 멈추면 대기열을 건너뛰고 주문을 받는다. 재고는 DB 잠금이 지키므로 잘못 팔리지는 않지만 느려질 수 있다. `freeticket_queue_redis_errors_total`이 늘면 Redis를 확인한다.
 
+## CDN과 엣지 대기실 (CloudFront)
+
+서버 앞에 CloudFront를 두고 대기열을 Lambda로 옮긴다([설계](design/edge-waiting-room.md)). 코드와 템플릿은 `infra/edge/`에 있다. AWS 콘솔의 CloudShell(브라우저 터미널)에서 배포하므로 PC에 AWS CLI를 설치할 필요가 없다.
+
+**1. 입장 토큰 키를 서버에 먼저 넣는다**
+
+```sh
+openssl rand -hex 32        # 출력값을 복사해 둔다
+nano ~/Free_Ticket/code/backend/.env.deploy   # QUEUE_TOKEN_SECRET=<복사한 값> 추가
+```
+
+다음 자동 배포 때 서버가 이 값을 읽는다. 바로 반영하려면 Actions에서 Deploy를 다시 실행한다.
+
+**2. CloudShell에서 스택을 만든다** (콘솔 오른쪽 위 리전: 서울, 상단의 `>_` 아이콘)
+
+```sh
+git clone https://github.com/wamddu/Free_Ticket.git && cd Free_Ticket/infra/edge
+BUCKET=free-ticket-edge-$(aws sts get-caller-identity --query Account --output text)
+aws s3 mb s3://$BUCKET
+aws cloudformation package --template-file template.yaml --s3-bucket $BUCKET --output-template-file packaged.yaml
+read -s -p "JWT_SECRET: " JWT; echo
+read -s -p "QUEUE_TOKEN_SECRET: " QTS; echo
+aws cloudformation deploy --template-file packaged.yaml --stack-name free-ticket-edge --capabilities CAPABILITY_IAM   --parameter-overrides OriginDomain=13-209-194-94.sslip.io JwtSecret="$JWT" QueueTokenSecret="$QTS"
+aws cloudformation describe-stacks --stack-name free-ticket-edge --query "Stacks[0].Outputs" --output table
+```
+
+- `JWT_SECRET`은 서버 `.env.deploy`의 같은 이름 값, `QUEUE_TOKEN_SECRET`은 1에서 만든 값이다. `read -s`라 화면에 보이지 않는다.
+- CloudFront 생성에 5~10분 걸린다. 끝나면 `SiteUrl`(예: `https://d1234.cloudfront.net`)이 새 접속 주소다.
+
+**3. 주소를 바꾼다**
+
+- 서버 `.env.deploy`에 `CORS_ALLOWED_ORIGINS=<SiteUrl>`을 넣고 `docker compose ... up -d`로 백엔드를 다시 띄운다. 브라우저는 CloudFront 주소를 Origin으로 보내고 서버는 자기 주소를 Host로 받아서, 이 값이 없으면 로그인·토큰 재발급이 403으로 거절된다.
+- 네이버 클라우드 콘솔 → Maps → Application → 웹 서비스 URL에 `SiteUrl`을 추가한다.
+- 토스 결제는 현재 접속 주소로 돌아오는 주소를 만들어 바꿀 것이 없다.
+- `/health`, `/grafana`는 기존 주소(`https://13-209-194-94.sslip.io`)로도 계속 열린다.
+
+**4. 확인**
+
+- `SiteUrl`에서 로그인, 공연 조회, 예매·결제가 되는지 본다.
+- 대기열을 켠 공연(`events.queue_enabled = 1`)에서 대기 화면이 뜨고, 입장 후 주문이 되는지 본다. 서버 Grafana의 `freeticket_queue_edge_accepted_total`이 늘면 엣지 입장 토큰으로 주문한 것이다.
+
+**되돌리기:** CloudShell에서 `aws cloudformation delete-stack --stack-name free-ticket-edge`. 기존 주소는 그대로 동작한다.
+
 ## 백업에서 복구
 
 자동 배포는 매번 `~/backups/free_ticket-<시각>-<커밋>.sql`에 백업을 남긴다(최근 10개).

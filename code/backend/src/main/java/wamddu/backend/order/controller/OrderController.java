@@ -24,10 +24,11 @@ public class OrderController {
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<CheckoutOrderResponse> createOrder(
             @Valid @RequestBody CreateOrderRequest request,
-            @AuthenticationPrincipal UserDetails principal
+            @AuthenticationPrincipal UserDetails principal,
+            @RequestHeader(name = "X-Queue-Token", required = false) String queueToken
     ) {
         // Outside the order transaction on purpose; see QueueGate.
-        queueGate.requirePass(request.getTicketId(), userId(principal));
+        queueGate.requirePass(request.getTicketId(), userId(principal), queueToken);
         return ApiResponse.success("주문이 생성되었습니다.", orderService.createOrder(request, userId(principal)));
     }
 

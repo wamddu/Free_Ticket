@@ -6,11 +6,13 @@ import type {
   ReservationHistory,
 } from "../types/Payment";
 
-export async function createOrder(ticketId: number, quantity: number) {
-  const response = await api.post<ApiDataResponse<CheckoutOrder>>("/orders", {
-    ticketId,
-    quantity,
-  });
+// queueToken: entry token from the edge waiting room (CloudFront + Lambda), checked by the order API.
+export async function createOrder(ticketId: number, quantity: number, queueToken?: string | null) {
+  const response = await api.post<ApiDataResponse<CheckoutOrder>>(
+    "/orders",
+    { ticketId, quantity },
+    queueToken ? { headers: { "X-Queue-Token": queueToken } } : undefined,
+  );
   return response.data.data;
 }
 

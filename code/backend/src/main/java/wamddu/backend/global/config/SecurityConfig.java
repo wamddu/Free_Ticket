@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.jspecify.annotations.Nullable;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
@@ -27,6 +28,7 @@ import wamddu.backend.global.security.JwtProvider;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -37,6 +39,9 @@ public class SecurityConfig {
 
     private final JwtProvider jwtProvider;
     private final ObjectMapper errorJson = new ObjectMapper();
+
+    @Value("${app.cors.allowed-origins:}")
+    private List<String> extraOrigins = List.of();
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -52,10 +57,10 @@ public class SecurityConfig {
                     @Override
                     public @Nullable CorsConfiguration getCorsConfiguration(HttpServletRequest request) {
                         CorsConfiguration config = new CorsConfiguration();
-                        config.setAllowedOriginPatterns(List.of(
-                                "http://localhost:*",
-                                "http://127.0.0.1:*"
-                        ));
+                        List<String> origins = new ArrayList<>(List.of("http://localhost:*", "http://127.0.0.1:*"));
+                        // A CDN in front (CloudFront) sends its own address as Origin while the Host is this server's.
+                        origins.addAll(extraOrigins.stream().map(String::trim).filter(o -> !o.isEmpty()).toList());
+                        config.setAllowedOriginPatterns(origins);
                         config.setAllowedMethods(Collections.singletonList("*"));
                         config.setAllowedHeaders(Collections.singletonList("*"));
                         config.setAllowCredentials(true);
