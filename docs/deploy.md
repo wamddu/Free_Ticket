@@ -269,6 +269,7 @@ aws cloudformation describe-stacks --stack-name free-ticket-edge --query "Stacks
 
 **3. 주소를 바꾼다**
 
+- 서버 `.env.deploy`에 `CORS_ALLOWED_ORIGINS=<SiteUrl>`을 넣고 `docker compose ... up -d`로 백엔드를 다시 띄운다. 브라우저는 CloudFront 주소를 Origin으로 보내고 서버는 자기 주소를 Host로 받아서, 이 값이 없으면 로그인·토큰 재발급이 403으로 거절된다.
 - 네이버 클라우드 콘솔 → Maps → Application → 웹 서비스 URL에 `SiteUrl`을 추가한다.
 - 토스 결제는 현재 접속 주소로 돌아오는 주소를 만들어 바꿀 것이 없다.
 - `/health`, `/grafana`는 기존 주소(`https://13-209-194-94.sslip.io`)로도 계속 열린다.
