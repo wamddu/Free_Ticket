@@ -40,7 +40,7 @@
 
 `OrderService.createOrder`의 조회 상태 목록과 `OrderRepository.sumActiveQuantity`에 `CANCELING`을 포함했다. `CONFIRMING`과 `CANCELING`은 만료 시각이 지나도 예약 수량으로 계산한다. 취소 결과가 불명확한 동안에는 재고를 풀지 않는다.
 
-취소 멱등성 키는 승인 키와 구분한 `cancel:{주문의 idempotencyKey}`다. 토스 응답의 결제 키·주문번호·금액·`CANCELED`가 일치해야 DB를 `CANCELED`로 바꾼다. 마지막 DB 트랜잭션에서도 주문을 잠그고 결제 정보 일치·Payment 부재·상태 전이 가능 여부를 확인한다. 요청 중 취소와 DB 반영이 모두 성공하면 `409 PAYMENT_CANCELED`를 반환한다. 스케줄러의 취소 상태 조회에서는 `CONFIRMING`에 남은 주문도 동일한 검증 후 취소 상태로 정리할 수 있다.
+취소 멱등성 키는 승인 키와 구분한다. 승인 직후 재고 부족에 따른 보상 취소는 `cancel:{주문의 idempotencyKey}`, 사용자의 예매 취소는 `reservation-cancel:{주문의 idempotencyKey}`다. 토스 응답의 결제 키·주문번호·금액·`CANCELED`가 일치해야 DB를 `CANCELED`로 바꾼다. 마지막 DB 트랜잭션에서도 주문을 잠그고 결제 정보 일치·Payment 부재·상태 전이 가능 여부를 확인한다. 요청 중 취소와 DB 반영이 모두 성공하면 `409 PAYMENT_CANCELED`를 반환한다. 스케줄러의 취소 상태 조회에서는 `CONFIRMING`에 남은 주문도 동일한 검증 후 취소 상태로 정리할 수 있다.
 
 ## 변경된 코드
 

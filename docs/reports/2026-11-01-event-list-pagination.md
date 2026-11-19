@@ -77,12 +77,12 @@ DB 카운터는 `performance_schema`의 SELECT·events·description 일치 diges
 ## 범위와 한계
 
 - first-page 응답 지연과 전송량을 비교했다. 전체 목록 조회와 같은 일을 더 빨리 수행한다는 주장은 하지 않는다.
-- 이 실행은 격리된 `free-ticket-perf` 프로젝트만 제어한다. `free_ticket_db`에는 접근하지 않으며 기존 로컬 `backend-redis-1`의 컨테이너 ID·실행 상태·시작 시각이 유지되었는지 대조했다. 모든 perf 컨테이너는 finally에서 중단했다.
-- before/after 환경 기록은 비밀값을 저장하지 않는 허용 목록을 사용했다. fixture는 기존 synthetic 3,000개와 기존 helper로 재생성한 Wave 500개다. 원본 데이터베이스의 snapshot을 수집하지 않았다.
+- 측정은 별도 Docker 프로젝트(`free-ticket-perf`)에서 실행해 개발 DB와 분리했다.
+- 데이터는 합성 공연 3,000개와 같은 방식으로 만든 500개다.
 - 고정 순서·각 세 번의 반복이며 장시간 부하, 다중 JVM의 동시 cache miss, 동시 이벤트 삽입 중 offset 이동, 모든 운영 장애는 검증하지 않았다. 페이지를 넘기는 동안 데이터가 바뀌면 offset 방식의 중복·누락 가능성이 남는다.
-- 단위·회귀 테스트와 프론트엔드 검증은 별도의 최종 작업 기록을 확인한다. 이 생성기는 벤치마크와 단일 Docker 통합 시나리오만 검증한다.
+- 이 측정은 벤치마크와 단일 Docker 통합 시나리오만 다룬다. 단위·회귀 테스트 결과는 아래 "구현 검증"에 있다.
 
-근거: `run_pagination.py`, `results/method.json`, `results/*-r*.json`, `results/*-r*.log`, `results/response-*-wire.json`, `results/integration.json`, `results/environment-*.json`, `summary.json`, `summary.csv`.
+근거(저장소 미포함): `run_pagination.py`, `results/method.json`, `results/*-r*.json`, `results/*-r*.log`, `results/response-*-wire.json`, `results/integration.json`, `results/environment-*.json`, `summary.json`, `summary.csv`.
 
 ## 구현 검증과 사용법
 

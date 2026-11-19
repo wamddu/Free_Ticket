@@ -85,7 +85,7 @@ Redis 통계는 서버 전체 keyspace 카운터 차이다. 단일 요청에서 
 
 ## 자동 테스트 근거
 
-저장된 테스트 결과 298개 중 295개 통과, 실패 0개, 오류 0개, 건너뜀 3개다. 건너뛴 테스트는 통과에 포함하지 않았다. 근거: `tests.json`.
+저장된 테스트 결과 298개 중 295개 통과, 실패 0개, 오류 0개, 건너뜀 3개다. 건너뛴 테스트는 통과에 포함하지 않았다. 근거(저장소 미포함): `tests.json`.
 
 ## 해석의 한계
 
@@ -96,7 +96,7 @@ Redis 통계는 서버 전체 keyspace 카운터 차이다. 단일 요청에서 
 - 리소스 수치는 컨테이너에 설정한 제한이다. 저장된 모니터 표본은 앱·DB 중심이므로 Redis 실제 CPU·메모리 사용량이나 비용 절감을 입증하지 않는다.
 - 무오류 로그나 단일 장애 복구 성공만으로 모든 운영 장애가 해결됐다고 주장하지 않는다.
 
-근거 파일: `run_redis.py`, `results/method.json`, `results/environment.json`, `results/*-r*.json`, `results/*-r*.log`, `results/response.json`, 통합 점검이 실행된 경우 `results/integration.json`. 상세 수치는 `summary.json`과 `summary.csv`에 저장했다.
+근거 파일(저장소 미포함): `run_redis.py`, `results/method.json`, `results/environment.json`, `results/*-r*.json`, `results/*-r*.log`, `results/response.json`, 통합 점검이 실행된 경우 `results/integration.json`. 상세 수치는 `summary.json`과 `summary.csv`에 저장했다.
 
 ## 로컬 실행
 
